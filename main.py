@@ -10,17 +10,21 @@ from scipy import stats
 from collections import defaultdict
 from sklearn.metrics import confusion_matrix, classification_report
 
+
 from version import print_versions
 from data_loader import DataLoader
 from model_wrapper import get_model_wrapper
 from evaluation import EvaluationMetrics, CrossValidation, StatisticalTests
+
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 
+
 logger = logging.getLogger("NLP_Comparador")
+
 
 
 class AcademicNLPEvaluator:
@@ -91,16 +95,22 @@ class AcademicNLPEvaluator:
                 gold_deprels = s["deprels"]
                 
                 try:
+                    # ✅ CORREÇÃO CRÍTICA: USA TOKENS GOLD DIRETAMENTE
+                    # Não retokeniza - usa os tokens do Bosque
+                    pred_pos = wrapper.pos_tag(gold_tokens)
+                    pred_lemmas = wrapper.lemmatize(gold_tokens)
+                    pred_heads, pred_deprels = wrapper.dependency_parse(gold_tokens)
+                    
+                    # Tokenização só para métricas de token
                     pred_tokens = wrapper.tokenize(text)
-                    pred_pos = wrapper.pos_tag(pred_tokens)
-                    pred_lemmas = wrapper.lemmatize(pred_tokens)
-                    pred_heads, pred_deprels = wrapper.dependency_parse(pred_tokens)
+                    
                 except Exception as e:
                     logger.warning(f"Erro processando sentença {i}: {e}")
                     continue
                 
-                # Alinhamento 1-1
-                length = min(len(gold_tokens), len(pred_tokens))
+                # ✅ CORREÇÃO: Alinhamento simplificado - mesmo tamanho
+                length = len(gold_tokens)
+                
                 gold_pos_align = gold_pos[:length]
                 gold_lemmas_align = gold_lemmas[:length]
                 gold_heads_align = gold_heads[:length]
@@ -133,7 +143,7 @@ class AcademicNLPEvaluator:
                 fold_metrics["las_correct"] += las_matches
                 fold_metrics["deps_total"] += len(gold_heads_align)
                 
-                # Tokenização (precisão/recall/f1)
+                # Tokenização (compara pred_tokens com gold_tokens)
                 token_tp = sum(1 for g, p in zip(gold_tokens, pred_tokens) if g == p)
                 fold_metrics["token_tp"] += token_tp
                 fold_metrics["token_gold_total"] += len(gold_tokens)
@@ -147,6 +157,7 @@ class AcademicNLPEvaluator:
             if fold_metrics["deps_total"]:
                 fold_results["uas"].append(fold_metrics["uas_correct"] / fold_metrics["deps_total"])
                 fold_results["las"].append(fold_metrics["las_correct"] / fold_metrics["deps_total"])
+            
             token_pred_total = fold_metrics["token_pred_total"]
             token_gold_total = fold_metrics["token_gold_total"]
 
@@ -168,7 +179,8 @@ class AcademicNLPEvaluator:
         logger.info(f"[NER] Avaliando HuggingFace ({model_name})")
         
         try:
-            wrapper = get_model_wrapper("huggingface", model_name, model_type="ner")
+            # ✅ CORREÇÃO: Use "huggingface_ner" como framework
+            wrapper = get_model_wrapper("huggingface_ner", model_name)
             wrapper.load_model()
         except Exception as e:
             logger.error(f"Erro ao carregar NER: {e}")
@@ -400,7 +412,7 @@ class AcademicNLPEvaluator:
             f.write("\\label{tab:resultados}\n")
             f.write("\\begin{tabular}{lccccccc}\n")
             f.write("\\toprule\n")
-            f.write("Modelo & POS & Lemma & UAS & LAS & Tok Prec & Tok Rec & Tok F1 \\\n")
+            f.write("Modelo & POS & Lemma & UAS & LAS & Tok Prec & Tok Rec & Tok F1 \\\\\n")
             f.write("\\midrule\n")
             
             for model_key, stats_dict in all_stats.items():
@@ -448,10 +460,10 @@ class AcademicNLPEvaluator:
                 f.write("\\label{tab:ner}\n")
                 f.write("\\begin{tabular}{lccc}\n")
                 f.write("\\toprule\n")
-                f.write("Modelo & Precisão & Revocação & F1 \\\n")
+                f.write("Modelo & Precisão & Revocação & F1 \\\\\n")
                 f.write("\\midrule\n")
                 for name, prec, rec, f1_score in ner_rows:
-                    f.write(f"{name} & {prec:.3f} & {rec:.3f} & {f1_score:.3f} \\\n")
+                    f.write(f"{name} & {prec:.3f} & {rec:.3f} & {f1_score:.3f} \\\\\n")
                 f.write("\\bottomrule\n")
                 f.write("\\end{tabular}\n")
                 f.write("\\end{table}\n")
@@ -474,6 +486,7 @@ class AcademicNLPEvaluator:
     
     def _empty_ner_results(self) -> dict:
         return {"precision": 0, "recall": 0, "f1": 0, "per_class": {}}
+
 
 
 def main():
@@ -556,7 +569,6 @@ def main():
     comparisons = {}
     model_keys = list(all_stats.keys())
     
-    # CORRIGIDO: Usar config.bootstrap_rounds ao invés de self.config
     bootstrap_rounds = config.get("bootstrap_rounds", 10000)
     
     for i, key_a in enumerate(model_keys):
@@ -569,7 +581,6 @@ def main():
                     scores_a = np.array(all_stats[key_a][metric]["scores"])
                     scores_b = np.array(all_stats[key_b][metric]["scores"])
                     
-                    # CORRIGIDO: Passar bootstrap_rounds
                     test_result = evaluator.statistical_test_bootstrap(scores_a, scores_b, bootstrap_rounds)
                     comparisons[comp_name][metric] = test_result
                     
@@ -587,6 +598,7 @@ def main():
     logger.info("  - resultados_kfold.csv")
     logger.info("  - tabelas_latex.tex")
     logger.info("=" * 60 + "\n")
+
 
 
 if __name__ == "__main__":

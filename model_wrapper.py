@@ -46,14 +46,10 @@ class NLPModelWrapper(ABC):
 
 class SpacyWrapper(NLPModelWrapper):
     """
-    Wrapper para spaCy - RECUPERADO do seu código antigo com melhorias.
-    
-    Usa lematização HÍBRIDA:
-    - spaCy quando muda a forma
-    - Suas regras PT-BR quando não muda
+    Wrapper para spaCy com suporte a tokens gold (pré-tokenizados).
     """
-    
     def load_model(self):
+        """ADICIONE ESTE MÉTODO!"""
         import spacy
         from spacy.cli import download
         
@@ -64,31 +60,43 @@ class SpacyWrapper(NLPModelWrapper):
             logger.warning(f"Downloading {self.model_name}...")
             download(self.model_name)
             self.model = spacy.load(self.model_name)
-    
     def _ensure_model(self):
         if self.model is None:
             self.load_model()
     
+    def _process_with_gold_tokens(self, tokens: List[str]):
+        """
+        Cria um Doc do spaCy a partir de tokens pré-definidos,
+        SEM retokenizar, e processa o pipeline.
+        """
+        from spacy.tokens import Doc
+        
+        self._ensure_model()
+        
+        # Cria Doc com tokens gold
+        doc = Doc(self.model.vocab, words=tokens)
+        
+        # Processa pipeline (tagger, parser, etc.) SEM tokenizer
+        for name, proc in self.model.pipeline:
+            if name != 'tokenizer':  # Pula tokenizer
+                doc = proc(doc)
+        
+        return doc
+    
     def tokenize(self, text: str) -> List[str]:
-        """Tokenização padrão spaCy."""
+        """Tokenização padrão spaCy (para quando não há tokens gold)."""
         self._ensure_model()
         doc = self.model(text)
         return [t.text for t in doc]
     
     def pos_tag(self, tokens: List[str]) -> List[str]:
-        """POS tagging (UPOS: NOUN, VERB, ADJ, etc.)."""
-        self._ensure_model()
-        doc = self.model(" ".join(tokens))
+        """POS tagging usando tokens gold."""
+        doc = self._process_with_gold_tokens(tokens)
         return [t.pos_ for t in doc]
     
     def lemmatize(self, tokens: List[str]) -> List[str]:
-        """
-        Lematização HÍBRIDA (seu método original - MANTIDO):
-        - usa lemma do spaCy quando muda a forma
-        - caso contrário, aplica suas regras morfológicas PT-BR
-        """
-        self._ensure_model()
-        doc = self.model(" ".join(tokens))
+        """Lematização usando tokens gold."""
+        doc = self._process_with_gold_tokens(tokens)
         lemmas: List[str] = []
         
         for tok in doc:
@@ -96,27 +104,25 @@ class SpacyWrapper(NLPModelWrapper):
             lemma_spacy = tok.lemma_.lower()
             surface_low = surface.lower()
             
-            # Se spaCy já retorna algo diferente, confia nele
+            # Se spaCy retorna algo diferente, usa
             if lemma_spacy and lemma_spacy != surface_low:
                 lemmas.append(lemma_spacy)
             else:
-                # Fallback: usa suas regras PT-BR
+                # Fallback: regras PT-BR
                 lemmas.append(rulebased_lemmatization(surface))
         
         return lemmas
     
     def dependency_parse(self, tokens: List[str]) -> Tuple[List[int], List[str]]:
-        """Parsing de dependências (heads 1-indexados, compat. UD)."""
-        self._ensure_model()
-        doc = self.model(" ".join(tokens))
+        """Parsing de dependências usando tokens gold."""
+        doc = self._process_with_gold_tokens(tokens)
         heads = [t.head.i + 1 for t in doc]  # 1-indexed
         deprels = [t.dep_ for t in doc]
         return heads, deprels
     
     def ner(self, tokens: List[str]) -> List[str]:
-        """NER em formato IOB."""
-        self._ensure_model()
-        doc = self.model(" ".join(tokens))
+        """NER usando tokens gold."""
+        doc = self._process_with_gold_tokens(tokens)
         tags = ["O"] * len(tokens)
         
         for ent in doc.ents:
@@ -125,7 +131,6 @@ class SpacyWrapper(NLPModelWrapper):
                     tags[i] = ("B-" if i == ent.start else "I-") + ent.label_
         
         return tags
-
 
 # ==================== STANZA WRAPPER - RECUPERADO E CORRIGIDO ====================
 
@@ -136,14 +141,22 @@ class StanzaWrapper(NLPModelWrapper):
     
     def load_model(self):
         import stanza
+        import torch
+        import os
+        
+        # ✅ FIX CRÍTICO: Desabilita weights_only no PyTorch 2.6+
+        os.environ['TORCH_WEIGHTS_ONLY'] = '0'
+        
+        # Backup: adiciona safe_globals
+        try:
+            torch.serialization.add_safe_globals([
+                __import__('numpy').core.multiarray._reconstruct,
+                __import__('numpy').ndarray,
+            ])
+        except:
+            pass
         
         try:
-            # FIX: Permite uso de legacy checkpoints no PyTorch 2.6+
-            import torch
-            torch.serialization.add_safe_globals([
-                __import__('numpy').core.multiarray._reconstruct
-            ])
-            
             self.model = stanza.Pipeline(
                 self.model_name,
                 processors="tokenize,pos,lemma,depparse,ner",
@@ -151,7 +164,7 @@ class StanzaWrapper(NLPModelWrapper):
             )
             logger.info(f"Stanza loaded: {self.model_name}")
         except Exception as e:
-            logger.warning(f"Error loading Stanza: {e}. Trying download...")
+            logger.warning(f"Error: {e}. Trying download...")
             try:
                 stanza.download(self.model_name)
                 self.model = stanza.Pipeline(
