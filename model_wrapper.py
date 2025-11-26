@@ -1,5 +1,7 @@
 from abc import ABC, abstractmethod
 from typing import List, Tuple
+import os
+os.environ['TORCH_WEIGHTS_ONLY'] = '0' 
 import torch
 import logging
 
@@ -142,11 +144,6 @@ class StanzaWrapper(NLPModelWrapper):
     def load_model(self):
         import stanza
         import torch
-        import os
-        
-        # ✅ FIX CRÍTICO: Desabilita weights_only no PyTorch 2.6+
-        os.environ['TORCH_WEIGHTS_ONLY'] = '0'
-        
         # Backup: adiciona safe_globals
         try:
             torch.serialization.add_safe_globals([
