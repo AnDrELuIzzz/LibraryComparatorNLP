@@ -1,14 +1,20 @@
 from abc import ABC, abstractmethod
 from typing import List, Tuple
 import os
+
+# ✅ Tenta configurar antes de importar torch (pode não funcionar com PyTorch 2.9+)
 os.environ['TORCH_WEIGHTS_ONLY'] = '0' 
+
 import torch
 import logging
 
+
 logger = logging.getLogger(__name__)
+
 
 # Importar suas regras de lematização
 from lemma_rules import rulebased_lemmatization
+
 
 
 class NLPModelWrapper(ABC):
@@ -44,14 +50,15 @@ class NLPModelWrapper(ABC):
         pass
 
 
-# ==================== SPACY WRAPPER - RECUPERADO E MELHORADO ====================
+
+# ==================== SPACY WRAPPER ====================
+
 
 class SpacyWrapper(NLPModelWrapper):
-    """
-    Wrapper para spaCy com suporte a tokens gold (pré-tokenizados).
-    """
+    """Wrapper para spaCy com suporte a tokens gold (pré-tokenizados)."""
+    
     def load_model(self):
-        """ADICIONE ESTE MÉTODO!"""
+        """Carrega modelo spaCy."""
         import spacy
         from spacy.cli import download
         
@@ -62,6 +69,7 @@ class SpacyWrapper(NLPModelWrapper):
             logger.warning(f"Downloading {self.model_name}...")
             download(self.model_name)
             self.model = spacy.load(self.model_name)
+    
     def _ensure_model(self):
         if self.model is None:
             self.load_model()
@@ -134,44 +142,49 @@ class SpacyWrapper(NLPModelWrapper):
         
         return tags
 
-# ==================== STANZA WRAPPER - RECUPERADO E CORRIGIDO ====================
+
+
+# ==================== STANZA WRAPPER (COM FIX DEFINITIVO) ====================
+
 
 class StanzaWrapper(NLPModelWrapper):
-    """
-    Wrapper para Stanza - RECUPERADO com FIX do erro torch.load.
-    """
-    
+    """Wrapper para Stanza (Português não possui modelo NER oficial)."""
+
     def load_model(self):
         import stanza
         import torch
-        # Backup: adiciona safe_globals
+
+        _original_load = torch.load
+
+        def _load_with_weights_only_false(*args, **kwargs):
+            kwargs['weights_only'] = False
+            return _original_load(*args, **kwargs)
+
+        torch.load = _load_with_weights_only_false
+
         try:
-            torch.serialization.add_safe_globals([
-                __import__('numpy').core.multiarray._reconstruct,
-                __import__('numpy').ndarray,
-            ])
-        except:
-            pass
-        
-        try:
-            self.model = stanza.Pipeline(
-                self.model_name,
-                processors="tokenize,pos,lemma,depparse,ner",
-                download_method=None
-            )
-            logger.info(f"Stanza loaded: {self.model_name}")
-        except Exception as e:
-            logger.warning(f"Error: {e}. Trying download...")
+            # Removemos 'ner' porque não há modelo pt disponível na distribuição oficial
+            processors = "tokenize,mwt,pos,lemma,depparse"
             try:
+                self.model = stanza.Pipeline(
+                    self.model_name,
+                    processors=processors,
+                    download_method=None,
+                )
+                logger.info(f"Stanza loaded (sem NER): {self.model_name}")
+            except Exception as e:
+                logger.warning(f"Error: {e}. Trying download...")
                 stanza.download(self.model_name)
                 self.model = stanza.Pipeline(
                     self.model_name,
-                    processors="tokenize,pos,lemma,depparse,ner"
+                    processors=processors,
                 )
-                logger.info(f"Stanza loaded after download")
-            except Exception as e2:
-                logger.error(f"Failed to load Stanza: {e2}")
-                raise
+                logger.info("Stanza loaded after download (sem NER)")
+        except Exception as e2:
+            logger.error(f"Failed to load Stanza: {e2}")
+            raise
+        finally:
+            torch.load = _original_load
     
     def _ensure_model(self):
         if self.model is None:
@@ -203,44 +216,18 @@ class StanzaWrapper(NLPModelWrapper):
         return heads, deprels
     
     def ner(self, tokens: List[str]) -> List[str]:
-        """NER do Stanza com alinhamento por caractere."""
-        self._ensure_model()
-        doc = self.model(" ".join(tokens))
-        tags = ["O"] * len(tokens)
-        
-        # Mapeamento char -> token
-        char_to_token = {}
-        char_pos = 0
-        for i, token in enumerate(tokens):
-            for _ in range(len(token)):
-                char_to_token[char_pos] = i
-                char_pos += 1
-            char_pos += 1  # espaço
-        
-        # Processa entidades
-        for sent in doc.sentences:
-            for ent in sent.ents:
-                start_char = ent.start_char
-                end_char = ent.end_char
-                
-                if start_char in char_to_token and (end_char - 1) in char_to_token:
-                    start_token = char_to_token[start_char]
-                    end_token = char_to_token[end_char - 1] + 1
-                    
-                    for i in range(start_token, min(end_token, len(tags))):
-                        if tags[i] == "O":
-                            tags[i] = ("B-" if i == start_token else "I-") + ent.type
-        
-        return tags
+        """Português sem NER: retorna somente "O"."""
+        return ["O"] * len(tokens)
 
 
-# ==================== HUGGINGFACE WRAPPER - RECUPERADO E MELHORADO ====================
+
+# ==================== HUGGINGFACE WRAPPER ====================
+
 
 class HuggingFaceNERWrapper(NLPModelWrapper):
     """
-    Wrapper para NER da HuggingFace - RECUPERADO do seu código antigo com melhorias.
-    
-    Alinha entidades aos tokens originais com alinhamento por caractere (seu método original).
+    Wrapper para NER da HuggingFace.
+    Alinha entidades aos tokens originais com alinhamento por caractere.
     """
     
     def __init__(self, model_name: str, device: str = "cpu"):
@@ -281,9 +268,7 @@ class HuggingFaceNERWrapper(NLPModelWrapper):
         return heads, deprels
     
     def ner(self, tokens: List[str]) -> List[str]:
-        """
-        NER com alinhamento por caractere (seu método original - MANTIDO e MELHORADO).
-        """
+        """NER com alinhamento por caractere."""
         self._ensure_model()
         
         text = " ".join(tokens)
@@ -294,8 +279,7 @@ class HuggingFaceNERWrapper(NLPModelWrapper):
     @staticmethod
     def _align_predictions_to_tokens(tokens: List[str], predictions: List[dict]) -> List[str]:
         """
-        Alinhamento por caractere (seu método original adaptado).
-        
+        Alinhamento por caractere.
         Mapeia spans de entidades aos índices de token, gerando tags IOB.
         """
         if not predictions:
@@ -337,10 +321,12 @@ class HuggingFaceNERWrapper(NLPModelWrapper):
         return token_tags
 
 
-# ==================== UDPIPE WRAPPER - RECUPERADO ====================
+
+# ==================== UDPIPE WRAPPER ====================
+
 
 class UDPipeWrapper(NLPModelWrapper):
-    """Wrapper para UDPipe - MANTIDO do código antigo."""
+    """Wrapper para UDPipe."""
     
     def load_model(self):
         import ufal.udpipe as udpipe
@@ -412,7 +398,9 @@ class UDPipeWrapper(NLPModelWrapper):
         return ["O"] * len(tokens)
 
 
+
 # ==================== FACTORY ====================
+
 
 def get_model_wrapper(
     framework: str,
