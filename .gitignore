@@ -1,0 +1,78 @@
+# Arquivos de ambiente Python
+.env
+.venv
+venv
+env
+ENV
+
+# Diretório de ambientes virtuais
+/__pycache__/
+**/__pycache__/
+*.py[cod]
+*.pyo
+
+# Arquivos de configuração de ambientes virtuais
+*.egg-info/
+*.egg
+.Python
+build/
+dist/
+*.whl
+
+# Dependências instaladas (p.e., se usar pip freeze)
+# arquivo de dependências -- opcional, descomente se desejar
+# requirements.txt
+requirements*.txt
+requirements/*
+
+# Modelos e caches de frameworks
+# HuggingFace transformers cache
+/.cache/huggingface/hub/
+# Numpy, torch, tensorflow caches
+/.cache/
+**/.cache/
+**/.keras/
+**/.keras_cache/
+
+# Modelos treinados, checkpoints e pesos (não versionar)
+models/
+*.pt
+*.bin
+*.safetensors
+*.ckpt
+*.pth
+# Cache de modelos
+*.model
+
+# Arquivos temporários e de trabalho
+*.log
+*.tmp
+*.bak
+*.swp
+*~ 
+
+# Arquivos do sistema operacional
+.DS_Store
+Thumbs.db
+ehthumbs.db
+desktop.ini
+
+# Arquivos de resultados, saídas e relatórios (se não quiser versionar)
+results/
+output/
+*.csv
+*.json
+*.txt
+*.tex
+*.pyc
+
+# Arquivos de configuração (senhas, chaves)
+config.json
+*.pem
+*.key
+*.env
+
+# Outros arquivos de backup ou temporários
+*.bak
+*.old
+.cache
