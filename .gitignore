@@ -18,6 +18,7 @@ ENV
 build/
 dist/
 *.whl
+*.sh
 
 # Dependências instaladas (p.e., se usar pip freeze)
 # arquivo de dependências -- opcional, descomente se desejar
@@ -58,7 +59,7 @@ ehthumbs.db
 desktop.ini
 
 # Arquivos de resultados, saídas e relatórios (se não quiser versionar)
-results/
+
 output/
 *.csv
 *.json

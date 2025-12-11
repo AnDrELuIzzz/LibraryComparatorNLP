@@ -19,6 +19,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
+from matplotlib.patches import Patch
 from pathlib import Path
 
 
@@ -369,9 +370,7 @@ class ResultsVisualizer:
             ax.set_xlabel("Δμ (Diferença Média)", fontsize=11)
             ax.set_title(f"{metric.replace('_', ' ').title()}", fontsize=12, fontweight='bold')
             ax.grid(axis='x', alpha=0.3)
-            
-            # Legenda
-            from matplotlib.patches import Patch
+          
             legend_elements = [
                 Patch(facecolor='#2ECC71', alpha=0.7, label='Significativo (p<0.05)'),
                 Patch(facecolor='#E74C3C', alpha=0.7, label='Não significativo (p≥0.05)')
