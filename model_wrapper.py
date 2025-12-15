@@ -1,20 +1,12 @@
 from abc import ABC, abstractmethod
 from typing import List, Tuple
 import os
-
-# ✅ Tenta configurar antes de importar torch (pode não funcionar com PyTorch 2.9+)
-os.environ['TORCH_WEIGHTS_ONLY'] = '0' 
-
-import torch
 import logging
-
 
 logger = logging.getLogger(__name__)
 
-
 # Importar suas regras de lematização
 from lemma_rules import rulebased_lemmatization
-
 
 
 class NLPModelWrapper(ABC):
@@ -50,9 +42,7 @@ class NLPModelWrapper(ABC):
         pass
 
 
-
 # ==================== SPACY WRAPPER ====================
-
 
 class SpacyWrapper(NLPModelWrapper):
     """Wrapper para spaCy com suporte a tokens gold (pré-tokenizados)."""
@@ -131,39 +121,32 @@ class SpacyWrapper(NLPModelWrapper):
         return heads, deprels
     
     def ner(self, tokens: List[str]) -> List[str]:
-        """NER usando tokens gold."""
+        """
+        NER usando tokens gold.
+        Retorna tags no formato IOB2 (B-TIPO, I-TIPO, O).
+        """
         doc = self._process_with_gold_tokens(tokens)
         tags = ["O"] * len(tokens)
         
         for ent in doc.ents:
             for i in range(ent.start, ent.end):
                 if i < len(tags):
-                    tags[i] = ("B-" if i == ent.start else "I-") + ent.label_
+                    prefix = "B-" if i == ent.start else "I-"
+                    tags[i] = prefix + ent.label_
         
         return tags
 
 
-
-# ==================== STANZA WRAPPER (COM FIX DEFINITIVO) ====================
-
+# ==================== STANZA WRAPPER ====================
 
 class StanzaWrapper(NLPModelWrapper):
     """Wrapper para Stanza (Português não possui modelo NER oficial)."""
 
     def load_model(self):
         import stanza
-        import torch
-
-        _original_load = torch.load
-
-        def _load_with_weights_only_false(*args, **kwargs):
-            kwargs['weights_only'] = False
-            return _original_load(*args, **kwargs)
-
-        torch.load = _load_with_weights_only_false
-
+        
         try:
-            # Removemos 'ner' porque não há modelo pt disponível na distribuição oficial
+            # Removemos 'ner' porque não há modelo pt disponível
             processors = "tokenize,mwt,pos,lemma,depparse"
             try:
                 self.model = stanza.Pipeline(
@@ -183,8 +166,6 @@ class StanzaWrapper(NLPModelWrapper):
         except Exception as e2:
             logger.error(f"Failed to load Stanza: {e2}")
             raise
-        finally:
-            torch.load = _original_load
     
     def _ensure_model(self):
         if self.model is None:
@@ -220,110 +201,7 @@ class StanzaWrapper(NLPModelWrapper):
         return ["O"] * len(tokens)
 
 
-
-# ==================== HUGGINGFACE WRAPPER ====================
-
-
-class HuggingFaceNERWrapper(NLPModelWrapper):
-    """
-    Wrapper para NER da HuggingFace.
-    Alinha entidades aos tokens originais com alinhamento por caractere.
-    """
-    
-    def __init__(self, model_name: str, device: str = "cpu"):
-        super().__init__(model_name, device)
-        self.pipeline = None
-    
-    def load_model(self):
-        from transformers import pipeline
-        
-        device_id = 0 if self.device == "cuda" and torch.cuda.is_available() else -1
-        
-        self.pipeline = pipeline(
-            "ner",
-            model=self.model_name,
-            tokenizer=self.model_name,
-            aggregation_strategy="simple",
-            device=device_id,
-        )
-        logger.info(f"HuggingFace NER loaded: {self.model_name}")
-    
-    def _ensure_model(self):
-        if self.pipeline is None:
-            self.load_model()
-    
-    def tokenize(self, text: str) -> List[str]:
-        # Para NER, usamos tokenização "gold" (WikiNER)
-        return text.split()
-    
-    def pos_tag(self, tokens: List[str]) -> List[str]:
-        return ["X"] * len(tokens)
-    
-    def lemmatize(self, tokens: List[str]) -> List[str]:
-        return tokens
-    
-    def dependency_parse(self, tokens: List[str]) -> Tuple[List[int], List[str]]:
-        heads = [0] * len(tokens)
-        deprels = ["dep"] * len(tokens)
-        return heads, deprels
-    
-    def ner(self, tokens: List[str]) -> List[str]:
-        """NER com alinhamento por caractere."""
-        self._ensure_model()
-        
-        text = " ".join(tokens)
-        predictions = self.pipeline(text)
-        
-        return self._align_predictions_to_tokens(tokens, predictions)
-    
-    @staticmethod
-    def _align_predictions_to_tokens(tokens: List[str], predictions: List[dict]) -> List[str]:
-        """
-        Alinhamento por caractere.
-        Mapeia spans de entidades aos índices de token, gerando tags IOB.
-        """
-        if not predictions:
-            return ["O"] * len(tokens)
-        
-        text = " ".join(tokens)
-        token_tags = ["O"] * len(tokens)
-        
-        # Mapa de caractere -> índice de token
-        char_to_token_idx = []
-        current_token = 0
-        
-        for token in tokens:
-            for _ in range(len(token)):
-                char_to_token_idx.append(current_token)
-            
-            # Espaço entre tokens
-            char_to_token_idx.append(current_token)
-            current_token += 1
-        
-        # Processa predições
-        for pred in predictions:
-            start = pred.get("start", 0)
-            end = pred.get("end", 0)
-            label = pred.get("entity_group", "MISC")
-            
-            if start >= len(char_to_token_idx) or end > len(char_to_token_idx):
-                continue
-            
-            start_token_idx = char_to_token_idx[start]
-            end_token_idx = char_to_token_idx[min(end - 1, len(char_to_token_idx) - 1)]
-            
-            # Marca B-/I- em IOB
-            token_tags[start_token_idx] = f"B-{label}"
-            for t in range(start_token_idx + 1, end_token_idx + 1):
-                if t < len(token_tags):
-                    token_tags[t] = f"I-{label}"
-        
-        return token_tags
-
-
-
 # ==================== UDPIPE WRAPPER ====================
-
 
 class UDPipeWrapper(NLPModelWrapper):
     """Wrapper para UDPipe."""
@@ -398,9 +276,7 @@ class UDPipeWrapper(NLPModelWrapper):
         return ["O"] * len(tokens)
 
 
-
 # ==================== FACTORY ====================
-
 
 def get_model_wrapper(
     framework: str,
@@ -415,8 +291,6 @@ def get_model_wrapper(
         return SpacyWrapper(model_name, device)
     elif f == "stanza":
         return StanzaWrapper(model_name, device)
-    elif f == "huggingface_ner":
-        return HuggingFaceNERWrapper(model_name, device)
     elif f == "udpipe":
         return UDPipeWrapper(model_name, device)
     else:

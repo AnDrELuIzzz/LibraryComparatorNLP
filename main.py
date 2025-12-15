@@ -1,21 +1,3 @@
-# -*- coding: utf-8 -*-
-"""
-Sistema Completo de Avaliação Comparativa de Ferramentas PLN para Português Brasileiro.
-
-Implementa:
-  - K-Fold Cross-Validation
-  - Bootstrap com NLPStatTest (Dror et al., 2018)
-  - Testes de Permutação (Approximate Randomization Test)
-  - Relatórios científicos (TXT, JSON, CSV, LaTeX)
-  
-Uso:
-  python main.py
-
-Referências:
-  - Dror et al. (2018): NLPStatTest - A Toolkit for Comparing NLP System Performance
-  - Efron & Tibshirani (1993): Bootstrap Methods
-"""
-
 import os
 import json
 import logging
@@ -193,11 +175,20 @@ class AcademicNLPEvaluator:
         }
     
     def run_ner_evaluation(self, wikiner_samples: list, model_name: str) -> dict:
-        """Avalia NER."""
-        logger.info(f"[NER] Avaliando HuggingFace ({model_name})")
+        """
+        Avalia NER usando spaCy com anotações gold do WikiNER.
+        
+        Args:
+            wikiner_samples: Lista de dicionários com 'tokens' e 'tags' (formato WikiNER)
+            model_name: Nome do modelo spaCy
+            
+        Returns:
+            Dict com métricas NER (precision, recall, f1, per_class)
+        """
+        logger.info(f"[NER] Avaliando spaCy ({model_name})")
         
         try:
-            wrapper = get_model_wrapper("huggingface_ner", model_name)
+            wrapper = get_model_wrapper("spacy", model_name)
             wrapper.load_model()
         except Exception as e:
             logger.error(f"Erro ao carregar NER: {e}")
@@ -211,6 +202,7 @@ class AcademicNLPEvaluator:
             gold = s["tags"]
             
             try:
+                # Usa tokens gold para NER
                 pred = wrapper.ner(tokens)
             except Exception as e:
                 logger.warning(f"Erro em NER: {e}")
@@ -220,27 +212,42 @@ class AcademicNLPEvaluator:
             all_gold.extend(gold[:length])
             all_pred.extend(pred[:length])
             
-            # Por classe
+            # Métricas por classe
             for g, p in zip(gold[:length], pred[:length]):
-                entity_class = g.split("-")[-1] if "-" in g else g
+                # Extrai tipo de entidade (remove B-/I-)
+                entity_gold = g.split("-")[-1] if "-" in g else g
+                entity_pred = p.split("-")[-1] if "-" in p else p
                 
                 if g == p and g != "O":
-                    ner_by_class[entity_class]["tp"] += 1
+                    # True Positive
+                    ner_by_class[entity_gold]["tp"] += 1
                 elif g != "O" and p == "O":
-                    ner_by_class[entity_class]["fn"] += 1
+                    # False Negative
+                    ner_by_class[entity_gold]["fn"] += 1
                 elif g == "O" and p != "O":
-                    ner_by_class[p.split("-")[-1]]["fp"] += 1
+                    # False Positive
+                    ner_by_class[entity_pred]["fp"] += 1
+                elif g != "O" and p != "O" and entity_gold != entity_pred:
+                    # Erro de tipo
+                    ner_by_class[entity_gold]["fn"] += 1
+                    ner_by_class[entity_pred]["fp"] += 1
         
+        # Métricas globais
         metrics = EvaluationMetrics.compute_ner_metrics(all_gold, all_pred)
         
-        # Por classe
+        # Métricas por classe
         metrics["per_class"] = {}
         for entity_class, counts in ner_by_class.items():
             tp, fp, fn = counts["tp"], counts["fp"], counts["fn"]
             prec = tp / (tp + fp) if (tp + fp) > 0 else 0
             rec = tp / (tp + fn) if (tp + fn) > 0 else 0
             f1 = 2 * (prec * rec) / (prec + rec) if (prec + rec) > 0 else 0
-            metrics["per_class"][entity_class] = {"precision": prec, "recall": rec, "f1": f1}
+            metrics["per_class"][entity_class] = {
+                "precision": prec,
+                "recall": rec,
+                "f1": f1,
+                "support": tp + fn
+            }
         
         return metrics
     
@@ -266,7 +273,7 @@ class AcademicNLPEvaluator:
         return stats_result
     
     # ========================================================================
-    # NOVOS MÉTODOS COM NLPStatTest
+    # MÉTODOS COM NLPStatTest
     # ========================================================================
     
     def run_bootstrap_comparisons(
@@ -277,14 +284,6 @@ class AcademicNLPEvaluator:
     ) -> dict:
         """
         Executa comparações pairwise com bootstrap automático (NLPStatTest).
-        
-        Args:
-            all_stats: Dicionário com estatísticas de todos os modelos
-            metrics_to_compare: Lista de métricas a comparar
-            bootstrap_rounds: Iterações de bootstrap
-            
-        Returns:
-            Dict com resultados organizados por métrica
         """
         if metrics_to_compare is None:
             metrics_to_compare = ["pos_accuracy", "uas", "las", "lemma_accuracy"]
@@ -334,149 +333,6 @@ class AcademicNLPEvaluator:
                     logger.info(f"  ✗ {comp_name}: p={result.p_value:.4f}")
         
         return comparisons
-    
-    def run_permutation_test_comparisons(
-        self,
-        all_stats: dict,
-        metrics_to_compare: list = None,
-        n_permutations: int = 10000
-    ) -> dict:
-        """
-        Executa comparações com Approximate Randomization Test (mais robusto).
-        
-        Args:
-            all_stats: Dicionário com estatísticas
-            metrics_to_compare: Métricas a comparar
-            n_permutations: Número de permutações
-            
-        Returns:
-            Dict com resultados do teste de permutação
-        """
-        if metrics_to_compare is None:
-            metrics_to_compare = ["pos_accuracy", "uas", "las"]
-        
-        comparisons = {}
-        model_keys = list(all_stats.keys())
-        
-        for metric in metrics_to_compare:
-            logger.info(f"\n[Permutation Test] Testando {metric}...")
-            comparisons[metric] = {}
-            
-            for i, key_a in enumerate(model_keys):
-                for key_b in model_keys[i+1:]:
-                    if metric not in all_stats[key_a] or metric not in all_stats[key_b]:
-                        continue
-                    
-                    scores_a = np.array(all_stats[key_a][metric]["scores"])
-                    scores_b = np.array(all_stats[key_b][metric]["scores"])
-                    
-                    p_value = BootstrapSignificanceTest.approximate_randomization_test(
-                        scores_a,
-                        scores_b,
-                        n_permutations=n_permutations,
-                        seed=self.config["seed"]
-                    )
-                    
-                    comp_name = f"{key_a} vs {key_b}"
-                    comparisons[metric][comp_name] = {
-                        "p_value": p_value,
-                        "mean_diff": float(np.mean(scores_a) - np.mean(scores_b)),
-                        "significant": p_value < 0.05,
-                        "test_type": "approximate_randomization",
-                        "n_permutations": n_permutations,
-                    }
-                    
-                    sig_marker = "✓" if p_value < 0.05 else "✗"
-                    logger.info(f"  {sig_marker} {comp_name}: p={p_value:.4f}")
-        
-        return comparisons
-    
-    def run_paired_bootstrap_tests(
-        self,
-        all_stats: dict,
-        metrics_to_compare: list = None,
-        bootstrap_rounds: int = 10000
-    ) -> dict:
-        """
-        Usa bootstrap pareado (K-Fold sincronizados).
-        
-        Args:
-            all_stats: Dicionário com estatísticas
-            metrics_to_compare: Métricas a comparar
-            bootstrap_rounds: Iterações de bootstrap
-            
-        Returns:
-            Dict com resultados de teste pareado
-        """
-        if metrics_to_compare is None:
-            metrics_to_compare = ["pos_accuracy", "uas", "las"]
-        
-        comparisons = {}
-        model_keys = list(all_stats.keys())
-        
-        for metric in metrics_to_compare:
-            logger.info(f"\n[Paired Bootstrap] Testando {metric}...")
-            comparisons[metric] = {}
-            
-            for i, key_a in enumerate(model_keys):
-                for key_b in model_keys[i+1:]:
-                    if metric not in all_stats[key_a] or metric not in all_stats[key_b]:
-                        continue
-                    
-                    scores_a = np.array(all_stats[key_a][metric]["scores"])
-                    scores_b = np.array(all_stats[key_b][metric]["scores"])
-                    
-                    if len(scores_a) != len(scores_b):
-                        logger.warning(
-                            f"Tamanhos diferentes: {key_a} ({len(scores_a)}) vs "
-                            f"{key_b} ({len(scores_b)})"
-                        )
-                        continue
-                    
-                    result = BootstrapSignificanceTest.paired_bootstrap_test(
-                        scores_a,
-                        scores_b,
-                        n_bootstrap_rounds=bootstrap_rounds,
-                        seed=self.config["seed"]
-                    )
-                    
-                    comp_name = f"{key_a} vs {key_b}"
-                    comparisons[metric][comp_name] = result
-                    comparisons[metric][comp_name]["test_type"] = "paired_bootstrap"
-                    
-                    sig_marker = "✓" if result["significant"] else "✗"
-                    logger.info(f"  {sig_marker} {comp_name}: p={result['p_value']:.4f}")
-        
-        return comparisons
-    
-    # ========================================================================
-    # MÉTODO LEGADO (mantido para compatibilidade)
-    # ========================================================================
-    
-    def statistical_test_bootstrap(self, scores_a: np.ndarray, scores_b: np.ndarray, rounds: int = 10000) -> dict:
-        """Bootstrap test simples (legado - use NLPStatTest para novos trabalhos)."""
-        if len(scores_a) < 2 or len(scores_b) < 2:
-            return {"p_value": None, "mean_diff": None}
-        
-        observed_diff = np.mean(scores_a) - np.mean(scores_b)
-        
-        combined = np.concatenate([scores_a, scores_b])
-        diffs = []
-        
-        for _ in range(rounds):
-            resampled = np.random.choice(combined, size=len(combined), replace=True)
-            sample_a = resampled[:len(scores_a)]
-            sample_b = resampled[len(scores_a):]
-            diffs.append(np.mean(sample_a) - np.mean(sample_b))
-        
-        p_value = np.sum(np.abs(diffs) >= np.abs(observed_diff)) / rounds
-        
-        return {
-            "p_value": float(p_value),
-            "mean_diff": float(observed_diff),
-            "ci_lower": float(np.percentile(diffs, 2.5)),
-            "ci_upper": float(np.percentile(diffs, 97.5)),
-        }
     
     def generate_academic_report(self, all_results: dict, all_stats: dict, comparisons: dict):
         """Gera relatório científico em TXT, JSON, CSV e LaTeX."""
@@ -578,21 +434,6 @@ class AcademicNLPEvaluator:
                             f.write(f"  {comp_name}: p={p_val:.4f}, Δμ={mean_diff:+.4f} {sig}\n")
             
             f.write("\n" + "=" * 120 + "\n")
-            f.write("INTERPRETAÇÃO:\n")
-            f.write("-" * 120 + "\n")
-            f.write(
-                "✓ Significativo: A diferença entre sistemas é estatisticamente significativa (p < 0.05).\n"
-                "✗ Não significativo: A diferença pode ser atribuída ao acaso (p >= 0.05).\n"
-                "IC 95%: Intervalo de confiança de 95% (não contém zero → significativo).\n\n"
-            )
-            f.write("REFERÊNCIA:\n")
-            f.write(
-                "Dror, R., Baum, G., Marinov, M., Avramovic, M., Roth, A., Chokshi, A., & "
-                "Dagan, I. (2018). NLPStatTest - A Toolkit for Comparing NLP System Performance. "
-                "In Proceedings of the 2020 Conference on Asia-Pacific Chapter of the Association "
-                "for Computational Linguistics.\n"
-            )
-            f.write("=" * 120 + "\n")
         
         logger.info(f"Relatório TXT salvo em {txt_path}")
         
@@ -615,126 +456,6 @@ class AcademicNLPEvaluator:
             json.dump(json_data, f, indent=2, default=str)
         
         logger.info(f"JSON detalhado salvo em {json_path}")
-        
-        # === CSV ===
-        csv_path = os.path.join(self.output_dir, "resultados_kfold.csv")
-        
-        csv_rows = []
-        for model_key, stats_dict in all_stats.items():
-            for metric, stat_info in stats_dict.items():
-                if isinstance(stat_info, dict) and "scores" in stat_info:
-                    for fold_id, score in enumerate(stat_info["scores"], 1):
-                        csv_rows.append({
-                            "modelo": model_key,
-                            "metrica": metric,
-                            "fold": fold_id,
-                            "score": score,
-                        })
-        
-        df_csv = pd.DataFrame(csv_rows)
-        df_csv.to_csv(csv_path, index=False)
-        
-        logger.info(f"CSV salvo em {csv_path}")
-        
-        # === LaTeX ===
-        latex_path = os.path.join(self.output_dir, "tabelas_latex.tex")
-        
-        with open(latex_path, "w", encoding="utf-8") as f:
-            f.write("% Tabelas para inserir no artigo LaTeX\n")
-            f.write("% Gerado automaticamente - Sistema de Avaliação PLN\n\n")
-            
-            # Tabela 1: Resumo
-            f.write("\\begin{table}[h]\n")
-            f.write("\\centering\n")
-            f.write("\\caption{Resultados Comparativos de Ferramentas PLN (Média ± Desvio Padrão)}\n")
-            f.write("\\label{tab:resultados}\n")
-            f.write("\\begin{tabular}{lccccccc}\n")
-            f.write("\\toprule\n")
-            f.write("Modelo & POS & Lemma & UAS & LAS & Tok Prec & Tok Rec & Tok F1 \\\\\n")
-            f.write("\\midrule\n")
-            
-            for model_key, stats_dict in all_stats.items():
-                model_short = model_key.replace("_", "\\_")
-                parts = [model_short]
-                
-                for metric in [
-                    "pos_accuracy",
-                    "lemma_accuracy",
-                    "uas",
-                    "las",
-                    "token_precision",
-                    "token_recall",
-                    "token_f1",
-                ]:
-                    if metric in stats_dict:
-                        mean = stats_dict[metric]["mean"]
-                        std = stats_dict[metric]["std"]
-                        parts.append(f"${mean:.3f} \\pm {std:.3f}$")
-                    else:
-                        parts.append("N/A")
-                
-                f.write(" & ".join(parts) + " \\\\\n")
-            
-            f.write("\\bottomrule\n")
-            f.write("\\end{tabular}\n")
-            f.write("\\end{table}\n")
-
-            # Tabela 2: NER
-            ner_rows = [
-                (
-                    model_key.replace("_", "\\_"),
-                    stats_dict["precision"]["mean"],
-                    stats_dict["recall"]["mean"],
-                    stats_dict["f1"]["mean"],
-                )
-                for model_key, stats_dict in all_stats.items()
-                if all(metric in stats_dict for metric in ["precision", "recall", "f1"])
-            ]
-
-            if ner_rows:
-                f.write("\n\\begin{table}[h]\n")
-                f.write("\\centering\n")
-                f.write("\\caption{Resultados de NER (Precisão/Revocação/F1)}\n")
-                f.write("\\label{tab:ner}\n")
-                f.write("\\begin{tabular}{lccc}\n")
-                f.write("\\toprule\n")
-                f.write("Modelo & Precisão & Revocação & F1 \\\\\n")
-                f.write("\\midrule\n")
-                for name, prec, rec, f1_score in ner_rows:
-                    f.write(f"{name} & {prec:.3f} & {rec:.3f} & {f1_score:.3f} \\\\\n")
-                f.write("\\bottomrule\n")
-                f.write("\\end{tabular}\n")
-                f.write("\\end{table}\n")
-            
-            # Tabela 3: Comparações Bootstrap
-            f.write("\n% Tabela de Comparações Estatísticas (Bootstrap NLPStatTest)\n")
-            f.write("\\begin{table}[h]\n")
-            f.write("\\centering\n")
-            f.write("\\caption{Comparações Estatísticas (NLPStatTest Bootstrap, p < 0.05 = significativo)}\n")
-            f.write("\\label{tab:comparacoes}\n")
-            f.write("\\begin{tabular}{llrrr}\n")
-            f.write("\\toprule\n")
-            f.write("Métrica & Comparação & $\\Delta\\mu$ & $p$-value & Sig. \\\\\n")
-            f.write("\\midrule\n")
-            
-            for metric_name, metric_comparisons in comparisons.items():
-                for i, (comp_name, result) in enumerate(metric_comparisons.items()):
-                    if isinstance(result, dict) and result.get("p_value"):
-                        p_val = result["p_value"]
-                        mean_diff = result["mean_diff"]
-                        sig = "\\checkmark" if p_val < 0.05 else ""
-                        
-                        metric_display = metric_name if i == 0 else ""
-                        f.write(
-                            f"{metric_display} & {comp_name} & {mean_diff:+.4f} & "
-                            f"{p_val:.4f} & {sig} \\\\\n"
-                        )
-            
-            f.write("\\bottomrule\n")
-            f.write("\\end{tabular}\n")
-            f.write("\\end{table}\n")
-        
-        logger.info(f"LaTeX salvo em {latex_path}")
     
     def _empty_results(self) -> dict:
         return {
@@ -752,28 +473,6 @@ class AcademicNLPEvaluator:
     
     def _empty_ner_results(self) -> dict:
         return {"precision": 0, "recall": 0, "f1": 0, "per_class": {}}
-
-
-def format_results_table_simple(metric_comparisons: dict) -> str:
-    """Tabela formatada simples para logging."""
-    lines = [
-        f"{'Comparação':<50} {'Δμ':>10} {'P-value':>10} {'IC 95%':<25} {'Sig':>5}",
-        "-" * 105
-    ]
-    
-    for comp_name, result in metric_comparisons.items():
-        if isinstance(result, dict) and result.get("p_value"):
-            sig = "✓" if result["significant"] else ""
-            ci_lower = result.get("ci_lower", 0)
-            ci_upper = result.get("ci_upper", 0)
-            ci_str = f"[{ci_lower:.4f}, {ci_upper:.4f}]"
-            
-            lines.append(
-                f"{comp_name:<50} {result['mean_diff']:>+10.6f} "
-                f"{result['p_value']:>10.4f} {ci_str:<25} {sig:>5}"
-            )
-    
-    return "\n".join(lines)
 
 
 def main():
@@ -798,7 +497,7 @@ def main():
     )
     
     sentences = loader.load_conllu()
-    wikiner_samples = loader.load_wikiner(max_sentences=1000)
+    wikiner_samples = loader.load_wikiner(max_sentences=config.get("ner_max_samples", 1000))
     
     logger.info(f"{len(sentences)} sentenças CONLL-U, {len(wikiner_samples)} WikiNER")
     
@@ -831,14 +530,14 @@ def main():
             logger.error(f"Erro em {fw}: {e}")
             continue
     
-    # === NER COM HUGGINGFACE ===
+    # === NER COM SPACY ===
     try:
-        hf_name = config["models"]["huggingface"]["general"]["name"]
-        key = f"huggingface_ner_{hf_name}"
+        spacy_name = config["models"]["spacy"]["name"]
+        key = f"spacy_ner_{spacy_name}"
         
         logger.info(f"\n{'='*60}\nAvaliando {key}\n{'='*60}")
         
-        ner_metrics = evaluator.run_ner_evaluation(wikiner_samples, hf_name)
+        ner_metrics = evaluator.run_ner_evaluation(wikiner_samples, spacy_name)
         all_results[key] = {"ner": ner_metrics}
         
         all_stats[key] = {
@@ -847,13 +546,27 @@ def main():
             "f1": {"mean": ner_metrics.get("f1", 0), "std": 0, "scores": [ner_metrics.get("f1", 0)]},
         }
         
+        logger.info(f"  NER Precision: {ner_metrics.get('precision', 0):.4f}")
+        logger.info(f"  NER Recall: {ner_metrics.get('recall', 0):.4f}")
         logger.info(f"  NER F1: {ner_metrics.get('f1', 0):.4f}")
+        
+        # Mostrar métricas por classe
+        if "per_class" in ner_metrics:
+            logger.info("\n  Métricas por classe:")
+            for entity_class, class_metrics in ner_metrics["per_class"].items():
+                logger.info(
+                    f"    {entity_class}: "
+                    f"P={class_metrics['precision']:.3f} "
+                    f"R={class_metrics['recall']:.3f} "
+                    f"F1={class_metrics['f1']:.3f} "
+                    f"(n={class_metrics['support']})"
+                )
     
     except Exception as e:
         logger.error(f"Erro em NER: {e}")
     
     # ========================================================================
-    # TESTES ESTATÍSTICOS COM NLPStatTest (NOVO!)
+    # TESTES ESTATÍSTICOS COM NLPStatTest
     # ========================================================================
     
     logger.info(f"\n{'='*60}\nTestes Estatísticos (NLPStatTest Bootstrap)\n{'='*60}")
@@ -867,27 +580,6 @@ def main():
         bootstrap_rounds=bootstrap_rounds
     )
     
-    # Exibir tabelas formatadas
-    for metric, metric_comparisons in comparisons.items():
-        logger.info(f"\n{metric.upper()}:")
-        logger.info(format_results_table_simple(metric_comparisons))
-    
-    # (OPCIONAL) Executar teste de permutação como validação
-    logger.info(f"\n{'='*60}\nValidação: Approximate Randomization Test\n{'='*60}")
-    permutation_results = evaluator.run_permutation_test_comparisons(
-        all_stats=all_stats,
-        metrics_to_compare=["pos_accuracy", "uas", "las"],
-        n_permutations=10000
-    )
-    
-    # (OPCIONAL) Executar teste pareado
-    logger.info(f"\n{'='*60}\nValidação: Paired Bootstrap Test\n{'='*60}")
-    paired_results = evaluator.run_paired_bootstrap_tests(
-        all_stats=all_stats,
-        metrics_to_compare=["pos_accuracy", "uas", "las"],
-        bootstrap_rounds=bootstrap_rounds
-    )
-    
     # === GERAR RELATÓRIOS ===
     evaluator.generate_academic_report(all_results, all_stats, comparisons)
     
@@ -896,8 +588,6 @@ def main():
     logger.info(f"Arquivos salvos em: {evaluator.output_dir}/")
     logger.info("  - relatorio_academico.txt")
     logger.info("  - metricas_completas.json")
-    logger.info("  - resultados_kfold.csv")
-    logger.info("  - tabelas_latex.tex")
     logger.info("=" * 60 + "\n")
 
 
