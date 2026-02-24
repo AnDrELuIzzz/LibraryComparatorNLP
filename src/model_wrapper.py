@@ -159,8 +159,16 @@ class SpacyWrapper(NLPModelWrapper):
 
     def dependency_parse_gold(self, tokens: List[str]) -> Tuple[List[int], List[str]]:
         doc = self._process_with_gold_tokens(tokens)
-        heads = [t.head.i + 1 for t in doc]  # doc inteiro (não por sentença)
-        deprels = [t.dep_ for t in doc]
+
+        heads = []
+        deprels = []
+        for t in doc:
+            deprels.append(t.dep_ or "dep")
+            # se o parser devolver self-head, vira root (0) para evitar ciclo
+            if t.head.i == t.i:
+                heads.append(0)
+            else:
+                heads.append(t.head.i + 1)  # 1..n
         return heads, deprels
 
     def ner_gold(self, tokens: List[str]) -> List[str]:

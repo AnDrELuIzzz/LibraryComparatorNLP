@@ -31,6 +31,84 @@ def _is_mwt_id(id_field: str) -> bool:
 
 def normalize_ud_tree(heads: List[int], deprels: List[str]) -> Tuple[List[int], List[str]]:
     """
+    Deixa HEAD/DEPREL sempre válidos para o conll18_ud_eval.py:
+    - HEAD em 0..N (0=root) e sem self-loop
+    - exatamente 1 raiz
+    - sem ciclos (quebra ciclos reanexando no root)
+    O conll18 aborta em ciclos e múltiplas raízes. [web:25]
+    """
+    n = len(heads)
+    if n == 0:
+        return heads, deprels
+
+    # 0) Coagir tipos e alinhar tamanhos
+    new_heads: List[int] = []
+    for h in heads:
+        try:
+            new_heads.append(int(h))
+        except Exception:
+            new_heads.append(0)
+
+    new_deprels = list(deprels) if deprels is not None else ["dep"] * n
+    if len(new_deprels) != n:
+        new_deprels = (new_deprels + ["dep"] * n)[:n]
+
+    # 1) Corrigir HEAD fora do range e self-loop
+    for i, h in enumerate(new_heads):
+        wid = i + 1
+        if h < 0 or h > n:
+            new_heads[i] = 0
+            new_deprels[i] = "root"
+        elif h == wid:
+            new_heads[i] = 0
+            new_deprels[i] = "root"
+
+    # 2) Garantir pelo menos uma raiz (para escolher root_id)
+    roots = [i for i, h in enumerate(new_heads) if h == 0]
+    if not roots:
+        new_heads[0] = 0
+        new_deprels[0] = "root"
+        roots = [0]
+
+    root_id = roots[0] + 1  # 1-indexed
+
+    # 3) Quebrar ciclos: caminhada de pais; ao detectar ciclo, reanexa no root
+    for start in range(1, n + 1):
+        seen = set()
+        cur = start
+        while True:
+            h = new_heads[cur - 1]
+            if h == 0:
+                break
+            if h < 0 or h > n:
+                new_heads[cur - 1] = root_id if cur != root_id else 0
+                new_deprels[cur - 1] = "dep" if cur != root_id else "root"
+                break
+            if h == cur or h in seen:
+                new_heads[cur - 1] = root_id if cur != root_id else 0
+                new_deprels[cur - 1] = "dep" if cur != root_id else "root"
+                break
+            seen.add(cur)
+            cur = h
+
+    # 4) Garantir exatamente 1 raiz (pode ter surgido mais de uma após correções)
+    roots = [i for i, h in enumerate(new_heads) if h == 0]
+    if len(roots) == 0:
+        new_heads[root_id - 1] = 0
+        new_deprels[root_id - 1] = "root"
+        roots = [root_id - 1]
+
+    if len(roots) > 1:
+        main_root = roots[0]
+        main_root_id = main_root + 1
+        new_deprels[main_root] = "root"
+        for r in roots[1:]:
+            # reanexa as "raízes extras" na raiz principal
+            new_heads[r] = main_root_id
+            new_deprels[r] = "dep"
+
+    return new_heads, new_deprels
+    """
     Normaliza árvore UD para não quebrar o conll18_ud_eval.py:
     - HEAD em 0..N (0=root)
     - exatamente 1 raiz por sentença
@@ -68,6 +146,8 @@ def normalize_ud_tree(heads: List[int], deprels: List[str]) -> Tuple[List[int], 
             new_deprels[i] = "dep"
     else:
         new_deprels[roots[0]] = "root"
+    
+
 
     return new_heads, new_deprels
 
