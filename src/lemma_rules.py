@@ -1,22 +1,20 @@
-# lemma_rules.py
-
+# -*- coding: utf-8 -*-
 import re
 
 def rulebased_lemmatization(word: str) -> str:
     """
-    Versão compacta baseada nas suas regras de comparador_conllu_hugging.py.
-    Adapte substituindo pelas suas regras completas de verbos/substantivos/adjetivos.
+    Lematizador PT-BR simples baseado em regex.
+    Ajuste/expanda conforme sua necessidade.
     """
     w = word.lower()
 
-    # Exemplos básicos (substitua pelas suas listas completas):
     verb_rules = [
-        (r"(ar|er|ir)am$", r"\1"),  # cantaram -> cantar
-        (r"(ar|er|ir)emos$", r"\1"),  # cantaremos -> cantar
-        (r"(ar|er|ir)ão$", r"\1"),  # cantarão -> cantar
-        (r"ando$", "ar"),  # cantando -> cantar
-        (r"endo$", "er"),  # comendo -> comer
-        (r"indo$", "ir"),  # partindo -> partir
+        (r"(ar|er|ir)am$", r"\1"),
+        (r"(ar|er|ir)emos$", r"\1"),
+        (r"(ar|er|ir)ão$", r"\1"),
+        (r"ando$", "ar"),
+        (r"endo$", "er"),
+        (r"indo$", "ir"),
     ]
 
     noun_adj_rules = [
