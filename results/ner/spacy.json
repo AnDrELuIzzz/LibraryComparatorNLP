@@ -1,0 +1,27 @@
+{
+  "framework": "spacy",
+  "model": "pt_core_news_lg",
+  "token_level": {
+    "precision": 0.9467244076208521,
+    "recall": 0.3759825327510917,
+    "f1": 0.5366928675292877,
+    "labels": [
+      "B-LOC",
+      "B-MISC",
+      "B-ORG",
+      "B-PER",
+      "I-LOC",
+      "I-MISC",
+      "I-ORG",
+      "I-PER"
+    ],
+    "support_total": null
+  },
+  "span_level": {
+    "precision": 0.9372221045945374,
+    "recall": 0.9397091603863709,
+    "f1": 0.938463984735252,
+    "report": "              precision    recall  f1-score   support\n\n         LOC     0.9332    0.9469    0.9400      5666\n        MISC     0.8983    0.8750    0.8865       848\n         ORG     0.9056    0.9016    0.9036       681\n         PER     0.9722    0.9578    0.9649      2226\n\n   micro avg     0.9372    0.9397    0.9385      9421\n   macro avg     0.9273    0.9203    0.9238      9421\nweighted avg     0.9373    0.9397    0.9384      9421\n",
+    "note": "seqeval (span-level)"
+  }
+}

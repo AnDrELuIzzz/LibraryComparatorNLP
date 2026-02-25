@@ -5,6 +5,7 @@ venv
 env
 ENV
 
+
 # Diretório de ambientes virtuais
 /__pycache__/
 **/__pycache__/
@@ -62,8 +63,8 @@ desktop.ini
 
 output/
 *.csv
-*.json
-*.txt
+# *.json
+# .txt
 *.tex
 *.pyc
 
@@ -77,3 +78,7 @@ config.json
 *.bak
 *.old
 .cache
+
+#outros arquivos de configuração específicos do projeto
+
+.data/
