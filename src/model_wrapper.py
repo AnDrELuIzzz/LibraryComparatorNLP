@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
+
 from abc import ABC, abstractmethod
 from typing import List, Tuple, Optional, Dict
 import logging
@@ -7,6 +8,7 @@ import logging
 from .lemma_rules import rulebased_lemmatization
 
 logger = logging.getLogger(__name__)
+
 
 class NLPModelWrapper(ABC):
     def __init__(self, model_name: str, device: str = "cpu"):
@@ -18,29 +20,10 @@ class NLPModelWrapper(ABC):
     def load_model(self):
         raise NotImplementedError
 
-    # -----------------------------
-    # Modo RAW (para CoNLL-U oficial)
-    # -----------------------------
     @abstractmethod
     def parse_raw(self, text: str) -> List[Dict]:
-        """
-        Retorna lista de sentenças:
-          [{
-            "tokens": [str...],
-            "lemmas": [str...],
-            "upos": [str...],
-            "heads": [int...],     # 1-indexed, 0 = root (por sentença)
-            "deprels": [str...],
-            "feats": [str...],     # pode ser "_" se não disponível
-            "text": str            # texto reconstruído da sentença (opcional)
-            "offsets": [(start,end)...] (opcional)
-          }, ...]
-        """
         raise NotImplementedError
 
-    # -----------------------------
-    # Modo GOLD TOKENS (controle)
-    # -----------------------------
     @abstractmethod
     def pos_tag_gold(self, tokens: List[str]) -> List[str]:
         raise NotImplementedError
@@ -62,11 +45,14 @@ class SpacyWrapper(NLPModelWrapper):
     def load_model(self):
         import spacy
         from spacy.cli import download
+
         try:
             self.model = spacy.load(self.model_name)
-            if ("parser" not in self.model.pipe_names
+            if (
+                "parser" not in self.model.pipe_names
                 and "senter" not in self.model.pipe_names
-                and "sentencizer" not in self.model.pipe_names):
+                and "sentencizer" not in self.model.pipe_names
+            ):
                 self.model.add_pipe("sentencizer")
             logger.info(f"spaCy loaded: {self.model_name}")
         except OSError:
@@ -79,20 +65,28 @@ class SpacyWrapper(NLPModelWrapper):
             self.load_model()
 
     def parse_raw(self, text: str) -> List[Dict]:
-        from spacy.tokens import Doc
         self._ensure()
         doc = self.model(text)
 
         sents = list(doc.sents) if doc.has_annotation("SENT_START") else [doc[:]]
         out = []
-        for si, sent in enumerate(sents, start=1):
-            tokens = [t.text for t in sent]
-            lemmas = [(t.lemma_ or t.text).lower() for t in sent]
-            upos = [t.pos_ or "_" for t in sent]
+        for sent in sents:
+            # ✅ Filtra tokens puramente whitespace gerados pelo \n separador de sentenças
+            real_toks = [t for t in sent if t.text.strip()]
+            if not real_toks:
+                continue
 
-            # feats (spaCy morph) -> UD-like "Feat=Val|Feat2=Val2"
+            # Mapeamento: índice absoluto no doc → posição 1-based na lista filtrada
+            tok_idx_map: Dict[int, int] = {
+                t.i: new_i for new_i, t in enumerate(real_toks, start=1)
+            }
+
+            tokens = [t.text for t in real_toks]
+            lemmas = [(t.lemma_ or t.text).lower() for t in real_toks]
+            upos = [t.pos_ or "_" for t in real_toks]
+
             feats = []
-            for t in sent:
+            for t in real_toks:
                 if t.morph:
                     items = []
                     md = t.morph.to_dict()
@@ -107,33 +101,38 @@ class SpacyWrapper(NLPModelWrapper):
                 else:
                     feats.append("_")
 
-            # heads/deprels em índices de sentença (1-indexed), root=0
             heads = []
             deprels = []
-            sent_start = sent.start
-            for t in sent:
+            for t in real_toks:
                 deprels.append(t.dep_ or "_")
                 if t.head.i == t.i:
                     heads.append(0)
                 else:
-                    heads.append((t.head.i - sent_start) + 1)
+                    heads.append(tok_idx_map.get(t.head.i, 0))
 
-            offsets = [(t.idx, t.idx + len(t.text)) for t in sent]
-            out.append({
-                "tokens": tokens,
-                "lemmas": lemmas,
-                "upos": upos,
-                "heads": heads,
-                "deprels": deprels,
-                "feats": feats,
-                "offsets": offsets,
-                "text": sent.text
-            })
+            offsets = [(t.idx, t.idx + len(t.text)) for t in real_toks]
+
+            # spaCy não produz MWT em português — lista vazia
+            out.append(
+                {
+                    "tokens": tokens,
+                    "lemmas": lemmas,
+                    "upos": upos,
+                    "heads": heads,
+                    "deprels": deprels,
+                    "feats": feats,
+                    "offsets": offsets,
+                    "text": sent.text.strip(),
+                    "sent_start": int(real_toks[0].idx),
+                    "sent_end": int(real_toks[-1].idx + len(real_toks[-1].text)),
+                    "mwt": [],
+                }
+            )
         return out
 
-    # GOLD mode
     def _process_with_gold_tokens(self, tokens: List[str]):
         from spacy.tokens import Doc
+
         self._ensure()
         doc = Doc(self.model.vocab, words=tokens)
         for name, proc in self.model.pipeline:
@@ -159,16 +158,14 @@ class SpacyWrapper(NLPModelWrapper):
 
     def dependency_parse_gold(self, tokens: List[str]) -> Tuple[List[int], List[str]]:
         doc = self._process_with_gold_tokens(tokens)
-
         heads = []
         deprels = []
         for t in doc:
             deprels.append(t.dep_ or "dep")
-            # se o parser devolver self-head, vira root (0) para evitar ciclo
             if t.head.i == t.i:
                 heads.append(0)
             else:
-                heads.append(t.head.i + 1)  # 1..n
+                heads.append(t.head.i + 1)
         return heads, deprels
 
     def ner_gold(self, tokens: List[str]) -> List[str]:
@@ -184,6 +181,7 @@ class SpacyWrapper(NLPModelWrapper):
 class StanzaWrapper(NLPModelWrapper):
     def load_model(self):
         import stanza
+
         processors = "tokenize,mwt,pos,lemma,depparse"
         try:
             self.model = stanza.Pipeline(self.model_name, processors=processors, download_method=None)
@@ -200,37 +198,57 @@ class StanzaWrapper(NLPModelWrapper):
         self._ensure()
         doc = self.model(text)
         out = []
+
         for sent in doc.sentences:
+            # ✅ Captura informação de MWT a partir de sent.tokens (forma superficial).
+            # Ex: "pelo" é 1 token de superfície que expande para 2 palavras ("por", "o").
+            # O conll18_ud_eval.py concatena as formas de superfície (MWT) para verificar
+            # a cobertura, então precisamos emitir a linha "1-2  pelo  ..." no CoNLL-U.
+            mwt: List[Tuple[int, int, str]] = []
+            word_offset = 0
+            for token in sent.tokens:
+                n_words = len(token.words)
+                if n_words > 1:
+                    start_1based = word_offset + 1
+                    end_1based = word_offset + n_words
+                    mwt.append((start_1based, end_1based, token.text))
+                word_offset += n_words
+
             tokens = [w.text for w in sent.words]
             lemmas = [(w.lemma or w.text).lower() for w in sent.words]
             upos = [w.upos or "_" for w in sent.words]
-            heads = [int(w.head) for w in sent.words]  # stanza já usa 0 root, 1..n
+            heads = [int(w.head) for w in sent.words]
             deprels = [w.deprel or "_" for w in sent.words]
             feats = [w.feats if getattr(w, "feats", None) else "_" for w in sent.words]
 
-            # offsets: nem sempre disponíveis em words; se não tiver, deixa None
-            offsets = None
             starts = [getattr(w, "start_char", None) for w in sent.words]
             ends = [getattr(w, "end_char", None) for w in sent.words]
-
             if all(s is not None and e is not None for s, e in zip(starts, ends)):
                 offsets = [(int(s), int(e)) for s, e in zip(starts, ends)]
+                sent_start = min(int(s) for s in starts)
+                sent_end = max(int(e) for e in ends)
             else:
                 offsets = None
+                sent_start = None
+                sent_end = None
 
-            out.append({
-                "tokens": tokens,
-                "lemmas": lemmas,
-                "upos": upos,
-                "heads": heads,
-                "deprels": deprels,
-                "feats": feats,
-                "offsets": offsets,
-                "text": " ".join(tokens)
-            })
+            out.append(
+                {
+                    "tokens": tokens,
+                    "lemmas": lemmas,
+                    "upos": upos,
+                    "heads": heads,
+                    "deprels": deprels,
+                    "feats": feats,
+                    "offsets": offsets,
+                    "text": " ".join(tokens),
+                    "sent_start": sent_start,
+                    "sent_end": sent_end,
+                    "mwt": mwt,  # ✅ lista de (start_1based, end_1based, surface_form)
+                }
+            )
         return out
 
-    # GOLD mode (controle; NER inexistente para pt no wrapper)
     def pos_tag_gold(self, tokens: List[str]) -> List[str]:
         self._ensure()
         doc = self.model(" ".join(tokens))
@@ -258,6 +276,7 @@ class StanzaWrapper(NLPModelWrapper):
 class UDPipeWrapper(NLPModelWrapper):
     def load_model(self):
         import ufal.udpipe as udpipe
+
         self.udpipe = udpipe
         self.model = udpipe.Model.load(self.model_name)
         if not self.model:
@@ -267,7 +286,7 @@ class UDPipeWrapper(NLPModelWrapper):
             "tokenize",
             udpipe.Pipeline.DEFAULT,
             udpipe.Pipeline.DEFAULT,
-            "conllu"
+            "conllu",
         )
         logger.info(f"UDPipe loaded: {self.model_name}")
 
@@ -276,23 +295,19 @@ class UDPipeWrapper(NLPModelWrapper):
             self.load_model()
 
     def parse_raw(self, text: str) -> List[Dict]:
-        from .conllu_utils import read_conllu, build_document_text_from_gold  # evita circular? (uso leve)
         self._ensure()
         conllu_str = self.pipeline.process(text)
 
-        # parse "string" como se fosse arquivo: solução simples
         sents = []
-        cur = []
-        meta_sent_id = None
+        cur_words = []
+        cur_mwt: List[Tuple[int, int, str]] = []
         meta_text = None
+
         for line in conllu_str.splitlines():
             if not line.strip():
-                if cur:
-                    sents.append((meta_sent_id, meta_text, cur))
-                cur, meta_sent_id, meta_text = [], None, None
-                continue
-            if line.startswith("# sent_id"):
-                meta_sent_id = line.split("=", 1)[1].strip()
+                if cur_words:
+                    sents.append((meta_text, cur_words, cur_mwt))
+                cur_words, cur_mwt, meta_text = [], [], None
                 continue
             if line.startswith("# text"):
                 meta_text = line.split("=", 1)[1].strip()
@@ -302,33 +317,50 @@ class UDPipeWrapper(NLPModelWrapper):
             cols = line.split("\t")
             if len(cols) != 10:
                 continue
-            if "-" in cols[0] or "." in cols[0]:
+            tok_id = cols[0]
+            if "." in tok_id:
                 continue
-            cur.append(cols)
-        if cur:
-            sents.append((meta_sent_id, meta_text, cur))
+            # ✅ Captura linhas MWT em vez de descartá-las
+            if "-" in tok_id:
+                parts = tok_id.split("-")
+                try:
+                    start = int(parts[0])
+                    end = int(parts[1])
+                    cur_mwt.append((start, end, cols[1]))
+                except ValueError:
+                    pass
+                continue
+            cur_words.append(cols)
+
+        if cur_words:
+            sents.append((meta_text, cur_words, cur_mwt))
 
         out = []
-        for (sid, stxt, rows) in sents:
+        for (stxt, rows, mwt_list) in sents:
             tokens = [r[1] for r in rows]
-            lemmas = [(r[2] if r[2] else r[1]).lower() for r in rows]
+            lemmas = [((r[2] if r[2] else r[1]).lower()) for r in rows]
             upos = [r[3] or "_" for r in rows]
             feats = [r[5] or "_" for r in rows]
             heads = [int(r[6]) if r[6].isdigit() else 0 for r in rows]
             deprels = [r[7] or "_" for r in rows]
-            out.append({
-                "tokens": tokens,
-                "lemmas": lemmas,
-                "upos": upos,
-                "heads": heads,
-                "deprels": deprels,
-                "feats": feats,
-                "offsets": None,
-                "text": stxt or " ".join(tokens)
-            })
+
+            out.append(
+                {
+                    "tokens": tokens,
+                    "lemmas": lemmas,
+                    "upos": upos,
+                    "heads": heads,
+                    "deprels": deprels,
+                    "feats": feats,
+                    "offsets": None,
+                    "text": stxt or " ".join(tokens),
+                    "sent_start": None,
+                    "sent_end": None,
+                    "mwt": mwt_list,  # ✅ lista de (start_1based, end_1based, surface_form)
+                }
+            )
         return out
 
-    # GOLD mode
     def _process(self, text: str) -> str:
         self._ensure()
         return self.pipeline.process(text)

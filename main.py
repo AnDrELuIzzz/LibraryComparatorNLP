@@ -15,16 +15,14 @@ from src.report import save_report
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("PIPELINE")
 
+
 def controlled_im_analysis(config: dict) -> dict:
     """
-    Análise controlada (gold tokens) para Informedness/Markedness em UPOS e NER:
-    - UPOS: compara gold UPOS vs wrapper.pos_tag_gold(tokens)
-    - NER: usa WikiNER gold vs wrapper.ner_gold(tokens)
+    Mantém sua análise controlada (gold tokens) para IM em UPOS e NER.
     """
     ud_gold = config["paths"]["ud_gold_conllu"]
     gold_sents = read_conllu(ud_gold)
 
-    # gold UPOS (flatten)
     gold_upos = []
     tokens_flat = []
     for s in gold_sents:
@@ -40,19 +38,18 @@ def controlled_im_analysis(config: dict) -> dict:
 
     out = {}
 
-    # UPOS: por sistema (gold tokens)
+    # UPOS: gold tokens
     for key, (fw, model) in systems.items():
         wrapper = get_model_wrapper(fw, model)
         wrapper.load_model()
         pred_upos = wrapper.pos_tag_gold(tokens_flat)
         L = min(len(gold_upos), len(pred_upos))
         table = compute_im_table(gold_upos[:L], pred_upos[:L], ignore={"_"})
-        # adiciona suporte
         for lab, d in table.items():
             d["support"] = int(d["TP"] + d["FN"])
         out[f"upos_{key}"] = table
 
-    # NER: por sistema usando WikiNER (gold tokens)
+    # NER: WikiNER gold tokens
     from src.data_loader import DataLoader
     loader = DataLoader(conllu_path=ud_gold, wikiner_path=config["paths"]["wikiner_path"])
     samples = loader.load_wikiner(max_sentences=config.get("wikiner", {}).get("max_sentences", 5000))
@@ -78,12 +75,14 @@ def controlled_im_analysis(config: dict) -> dict:
 
     return out
 
+
 def main():
     with open("config.json", "r", encoding="utf-8") as f:
         config = json.load(f)
 
     versions = print_versions()
-    logger.info("1) Rodando pipelines (gerando CoNLL-U e WikiNER preditos)...")
+
+    logger.info("1) Rodando pipelines (UD end-to-end + WikiNER)...")
     run_all_pipelines(config)
 
     logger.info("2) Avaliação UD oficial (conll18_ud_eval.py)...")
@@ -101,6 +100,7 @@ def main():
 
     logger.info("6) Plotando gráficos...")
     os.system("python -m src.plot_results")
+
 
 if __name__ == "__main__":
     main()

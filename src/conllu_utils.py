@@ -152,22 +152,57 @@ def misc_spaceafter_from_offsets(offsets: List[Tuple[int, int]]) -> List[str]:
             misc[i] = "SpaceAfter=No"
     return misc
 
+def _clean_field(x: str) -> str:
+    if x is None:
+        return "_"
+    s = str(x)
+    s = s.replace("\t", " ").replace("\r", " ").replace("\n", " ")
+    s = s.strip()
+    return s if s else "_"
+
+def _clean_form(x: str) -> str:
+    s = _clean_field(x)
+    # FORM não pode conter whitespace; se virar "_" por ser vazio/whitespace, usa um placeholder
+    if s == "_":
+        return "WS"
+    # garante sem espaços
+    s = s.replace(" ", "")
+    return s if s else "WS"
+
+# ✅ CORREÇÃO: removido o segundo bloco "with open(...)" duplicado que sobrescrevia
+# o primeiro sem aplicar _clean_field/_clean_form, permitindo \n e \t nos campos.
 def write_conllu(path: str, sentences: List[ConlluSentence]):
     with open(path, "w", encoding="utf-8") as f:
         for sent in sentences:
-            f.write(f"# sent_id = {sent.sent_id}\n")
-            f.write(f"# text = {sent.text}\n")
+            sent_id = _clean_field(sent.sent_id)
+            text = _clean_field(sent.text)  # garante 1 linha (remove \n embutidos)
+
+            f.write(f"# sent_id = {sent_id}\n")
+            f.write(f"# text = {text}\n")
+
             for tok in sent.tokens:
                 f.write("\t".join([
-                    tok.id,
-                    tok.form,
-                    tok.lemma or "_",
-                    tok.upos or "_",
-                    tok.xpos or "_",
-                    tok.feats or "_",
-                    tok.head or "_",
-                    tok.deprel or "_",
-                    tok.deps or "_",
-                    tok.misc or "_",
+                    _clean_field(tok.id),
+                    _clean_form(tok.form),   # \n/\t → "WS" se só whitespace
+                    _clean_field(tok.lemma),
+                    _clean_field(tok.upos),
+                    _clean_field(tok.xpos),
+                    _clean_field(tok.feats),
+                    _clean_field(tok.head),
+                    _clean_field(tok.deprel),
+                    _clean_field(tok.deps),
+                    _clean_field(tok.misc),
                 ]) + "\n")
             f.write("\n")
+
+def reconstruct_text_from_gold(tokens: List[str], miscs: List[str]) -> str:
+    """
+    Reconstrói texto gold respeitando SpaceAfter=No do MISC.
+    Exemplo: ["d'", "água"] + ["SpaceAfter=No"] → "d'água"
+    """
+    text_parts = []
+    for tok, misc in zip(tokens, miscs):
+        text_parts.append(tok)
+        if "SpaceAfter=No" not in misc:
+            text_parts.append(" ")
+    return "".join(text_parts).rstrip()
