@@ -77,6 +77,8 @@ def test_ner_reproduz_resultado_salvo_e_iob2(reanalysis):
         assert ner["token_level_gold_iob1"][k] == pytest.approx(saved["token_level"][k], abs=1e-9)
         assert ner["span_level"][k] == pytest.approx(saved["span_level"][k], abs=1e-9)
     assert round(ner["token_level"]["f1"], 4) == 0.9336
+    for k in ("precision", "recall", "f1"):  # modo estrito IOB2 == modo padrão
+        assert ner["span_level_strict_iob2"][k] == pytest.approx(ner["span_level"][k], abs=1e-12)
     assert ner["n_sentences"] == 4701
 
 

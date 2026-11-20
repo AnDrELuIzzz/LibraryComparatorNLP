@@ -106,4 +106,5 @@ Tokens multipalavra da referência deixados sem expansão: {'spacy': {'gold_mult
 - Sentenças: 4701; tokens: 121387
 - Por token, gold IOB1 original (média ponderada, sem O): P=0.9467 R=0.3760 F1=0.5367
 - Por token, gold convertido para IOB2: P=0.9400 R=0.9276 F1=0.9336
-- Por entidade (seqeval): P=0.9372 R=0.9397 F1=0.9385
+- Por entidade (seqeval, modo padrão): P=0.9372 R=0.9397 F1=0.9385
+- Por entidade (seqeval, modo estrito IOB2): P=0.9372 R=0.9397 F1=0.9385

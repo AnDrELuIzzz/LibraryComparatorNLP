@@ -78,7 +78,7 @@ def run_reanalysis(B: int = DEFAULT_B, seed: int = DEFAULT_SEED) -> Dict:
     if len(gold_ner) != len(pred_ner):
         raise ValueError("Predições do WikiNER desalinhadas com o gold")
     ner = score_ner(gold_ner, pred_ner)
-    for k in ("span_level", "span_level_gold_iob1"):
+    for k in ("span_level", "span_level_gold_iob1", "span_level_strict_iob2"):
         if ner.get(k):
             ner[k].pop("report", None)
     out["ner_spacy"] = ner
@@ -148,7 +148,8 @@ def to_markdown(r: Dict) -> str:
           f"- Sentenças: {ner['n_sentences']}; tokens: {ner['n_tokens']}",
           "- Por token, gold IOB1 original (média ponderada, sem O): P={precision:.4f} R={recall:.4f} F1={f1:.4f}".format(**ner["token_level_gold_iob1"]),
           "- Por token, gold convertido para IOB2: P={precision:.4f} R={recall:.4f} F1={f1:.4f}".format(**ner["token_level"]),
-          "- Por entidade (seqeval): P={precision:.4f} R={recall:.4f} F1={f1:.4f}".format(**ner["span_level"]), ""]
+          "- Por entidade (seqeval, modo padrão): P={precision:.4f} R={recall:.4f} F1={f1:.4f}".format(**ner["span_level"]),
+          "- Por entidade (seqeval, modo estrito IOB2): P={precision:.4f} R={recall:.4f} F1={f1:.4f}".format(**ner["span_level_strict_iob2"]), ""]
     return "\n".join(L)
 
 

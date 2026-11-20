@@ -65,20 +65,27 @@ def score_ner(gold_sents: List[List[str]], pred_sents: List[List[str]]) -> Dict:
         "token_level_gold_iob1": token_level_prf1(gold_flat, pred_flat),
         "span_level": try_seqeval_spans(gold_iob2_sents, p_sents),
         "span_level_gold_iob1": try_seqeval_spans(g_sents, p_sents),
+        "span_level_strict_iob2": try_seqeval_spans(gold_iob2_sents, p_sents, strict=True),
         "n_sentences": len(g_sents),
         "n_tokens": len(gold_flat),
     }
 
 
-def try_seqeval_spans(gold_sents: List[List[str]], pred_sents: List[List[str]]) -> Dict | None:
+def try_seqeval_spans(gold_sents: List[List[str]], pred_sents: List[List[str]], strict: bool = False) -> Dict | None:
+    """Métricas por entidade com o seqeval: modo padrão (compatível com o conlleval)
+    ou, com strict=True, modo estrito com o esquema IOB2."""
     try:
         from seqeval.metrics import precision_score, recall_score, f1_score, classification_report
+        kw = {}
+        if strict:
+            from seqeval.scheme import IOB2
+            kw = {"mode": "strict", "scheme": IOB2}
         return {
-            "precision": float(precision_score(gold_sents, pred_sents)),
-            "recall": float(recall_score(gold_sents, pred_sents)),
-            "f1": float(f1_score(gold_sents, pred_sents)),
-            "report": classification_report(gold_sents, pred_sents, digits=4),
-            "note": "seqeval (span-level)"
+            "precision": float(precision_score(gold_sents, pred_sents, **kw)),
+            "recall": float(recall_score(gold_sents, pred_sents, **kw)),
+            "f1": float(f1_score(gold_sents, pred_sents, **kw)),
+            "report": classification_report(gold_sents, pred_sents, digits=4, **kw),
+            "note": "seqeval (span-level, strict IOB2)" if strict else "seqeval (span-level)"
         }
     except Exception:
         return None
