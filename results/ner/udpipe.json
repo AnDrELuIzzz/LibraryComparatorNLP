@@ -1,0 +1,27 @@
+{
+  "framework": "udpipe",
+  "model": "models/portuguese-bosque-ud-2.5-191206.udpipe",
+  "token_level": {
+    "precision": 0.0,
+    "recall": 0.0,
+    "f1": 0.0,
+    "labels": [
+      "B-LOC",
+      "B-MISC",
+      "B-ORG",
+      "B-PER",
+      "I-LOC",
+      "I-MISC",
+      "I-ORG",
+      "I-PER"
+    ],
+    "support_total": null
+  },
+  "span_level": {
+    "precision": 0.0,
+    "recall": 0.0,
+    "f1": 0.0,
+    "report": "              precision    recall  f1-score   support\n\n         LOC     0.0000    0.0000    0.0000      5666\n        MISC     0.0000    0.0000    0.0000       848\n         ORG     0.0000    0.0000    0.0000       681\n         PER     0.0000    0.0000    0.0000      2226\n\n   micro avg     0.0000    0.0000    0.0000      9421\n   macro avg     0.0000    0.0000    0.0000      9421\nweighted avg     0.0000    0.0000    0.0000      9421\n",
+    "note": "seqeval (span-level)"
+  }
+}
