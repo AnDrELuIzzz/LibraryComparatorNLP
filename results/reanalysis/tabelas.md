@@ -1,5 +1,7 @@
 # Reanálise (gerado por reanalysis.py)
 
+Teste do Bosque: 1167 sentenças, 27604 palavras sintáticas, 2015 tokens multipalavra; lemas com maiúscula: 2086 (7,56% das palavras).
+
 ## Sobreposição do teste (UD 2.12) com as partições anteriores
 
 | Versão | treino | desenvolvimento | teste | ausente |
@@ -103,7 +105,7 @@ Tokens multipalavra da referência deixados sem expansão: {'spacy': {'gold_mult
 
 ## NER (spaCy, WikiNER)
 
-- Sentenças: 4701; tokens: 121387
+- Sentenças: 4701; tokens: 121387; tokens de entidade no gold: 16030; rótulos B- no gold IOB1: 13
 - Por token, gold IOB1 original (média ponderada, sem O): P=0.9467 R=0.3760 F1=0.5367
 - Por token, gold convertido para IOB2: P=0.9400 R=0.9276 F1=0.9336
 - Por entidade (seqeval, modo padrão): P=0.9372 R=0.9397 F1=0.9385

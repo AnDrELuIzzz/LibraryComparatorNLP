@@ -2104,6 +2104,13 @@
       }
     }
   },
+  "corpus_stats": {
+    "sentences": 1167,
+    "words": 27604,
+    "multiword_tokens": 2015,
+    "lemmas_with_uppercase": 2086,
+    "lemmas_with_uppercase_pct": 7.556875815099261
+  },
   "ner_spacy": {
     "token_level": {
       "precision": 0.9399848598669837,
@@ -2156,6 +2163,8 @@
       "note": "seqeval (span-level, strict IOB2)"
     },
     "n_sentences": 4701,
-    "n_tokens": 121387
+    "n_tokens": 121387,
+    "gold_entity_tokens": 16030,
+    "gold_B_tags_iob1": 13
   }
 }

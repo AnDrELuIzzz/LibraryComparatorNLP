@@ -124,3 +124,13 @@ def test_contracoes_nao_expandidas(reanalysis):
     u = reanalysis["unexpanded_contractions"]
     assert u["spacy"]["unexpanded"] == u["spacy"]["gold_multiword_tokens"] == 2015
     assert u["udpipe"]["unexpanded"] == 0
+
+
+def test_estatisticas_citadas(reanalysis):
+    cs = reanalysis["corpus_stats"]
+    assert (cs["sentences"], cs["words"], cs["multiword_tokens"]) == (1167, 27604, 2015)
+    assert cs["lemmas_with_uppercase"] == 2086
+    ner = reanalysis["ner_spacy"]
+    assert (ner["n_tokens"], ner["gold_entity_tokens"], ner["gold_B_tags_iob1"]) == (121387, 16030, 13)
+    assert reanalysis["subsets"]["spacy"]["ineditas"]["gold_words"] == 2296
+    assert reanalysis["subsets"]["spacy"]["fora_do_treino"]["n_sentences"] == 399

@@ -41,6 +41,22 @@ def system_path(name: str) -> str:
     return os.path.join(ROOT, "outputs", name, "bosque_pred_e2e.conllu")
 
 
+def bosque_stats(gold_path: str, word_sent) -> Dict:
+    """Estatísticas descritivas do teste do Bosque citadas no artigo."""
+    n_mwt, upper_lemmas = 0, 0
+    with open(gold_path, encoding="utf-8") as f:
+        for line in f:
+            cols = line.rstrip("\n").split("\t")
+            if len(cols) != 10:
+                continue
+            if "-" in cols[0]:
+                n_mwt += 1
+            elif cols[0].isdigit() and cols[2] != cols[2].lower():
+                upper_lemmas += 1
+    return {"sentences": len(set(word_sent)), "words": len(word_sent), "multiword_tokens": n_mwt,
+            "lemmas_with_uppercase": upper_lemmas, "lemmas_with_uppercase_pct": 100 * upper_lemmas / len(word_sent)}
+
+
 def run_reanalysis(B: int = DEFAULT_B, seed: int = DEFAULT_SEED) -> Dict:
     word_sent = gold_word_sent_ids(GOLD)
     origin = load_origin_table()
@@ -72,12 +88,17 @@ def run_reanalysis(B: int = DEFAULT_B, seed: int = DEFAULT_SEED) -> Dict:
     out["unexpanded_contractions"] = {n: unexpanded_contractions(GOLD, system_path(n)) for n in SYSTEMS}
     out["im_aligned"] = {n: im_table_from_aligned(pairs[n]) for n in SYSTEMS}
 
+    out["corpus_stats"] = bosque_stats(GOLD, word_sent)
+
     gold_ner = [s["tags"] for s in
                 DataLoader(conllu_path="(unused)", wikiner_path=WIKINER).load_wikiner(max_sentences=WIKINER_MAX_LINES)]
     pred_ner = read_bio_predictions(os.path.join(ROOT, "outputs", "spacy", "wikiner_pred.bio"))
     if len(gold_ner) != len(pred_ner):
         raise ValueError("Predições do WikiNER desalinhadas com o gold")
     ner = score_ner(gold_ner, pred_ner)
+    flat = [t for sent in gold_ner for t in sent]
+    ner["gold_entity_tokens"] = sum(t != "O" for t in flat)
+    ner["gold_B_tags_iob1"] = sum(t.startswith("B-") for t in flat)
     for k in ("span_level", "span_level_gold_iob1", "span_level_strict_iob2"):
         if ner.get(k):
             ner[k].pop("report", None)
@@ -90,7 +111,11 @@ def fmt(x: float) -> str:
 
 
 def to_markdown(r: Dict) -> str:
-    L = ["# Reanálise (gerado por reanalysis.py)", ""]
+    cs = r["corpus_stats"]
+    L = ["# Reanálise (gerado por reanalysis.py)", "",
+         f"Teste do Bosque: {cs['sentences']} sentenças, {cs['words']} palavras sintáticas, "
+         f"{cs['multiword_tokens']} tokens multipalavra; lemas com maiúscula: {cs['lemmas_with_uppercase']} "
+         f"({fmt(cs['lemmas_with_uppercase_pct'])}% das palavras).", ""]
     ov = r["overlap"]["by_release"]
     L += ["## Sobreposição do teste (UD 2.12) com as partições anteriores", "",
           "| Versão | treino | desenvolvimento | teste | ausente |", "|---|---|---|---|---|"]
@@ -145,7 +170,8 @@ def to_markdown(r: Dict) -> str:
 
     ner = r["ner_spacy"]
     L += ["", "## NER (spaCy, WikiNER)", "",
-          f"- Sentenças: {ner['n_sentences']}; tokens: {ner['n_tokens']}",
+          f"- Sentenças: {ner['n_sentences']}; tokens: {ner['n_tokens']}; tokens de entidade no gold: "
+          f"{ner['gold_entity_tokens']}; rótulos B- no gold IOB1: {ner['gold_B_tags_iob1']}",
           "- Por token, gold IOB1 original (média ponderada, sem O): P={precision:.4f} R={recall:.4f} F1={f1:.4f}".format(**ner["token_level_gold_iob1"]),
           "- Por token, gold convertido para IOB2: P={precision:.4f} R={recall:.4f} F1={f1:.4f}".format(**ner["token_level"]),
           "- Por entidade (seqeval, modo padrão): P={precision:.4f} R={recall:.4f} F1={f1:.4f}".format(**ner["span_level"]),
