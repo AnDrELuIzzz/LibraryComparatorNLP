@@ -50,3 +50,30 @@ def compute_im_table(gold: List[str], pred: List[str], ignore: set | None = None
     for lab in labels:
         out[lab] = {**cps[lab], **informedness_markedness(cps[lab])}
     return out
+
+
+def mcc(counts: Dict[str, int]) -> float:
+    """Coeficiente de correlação de Matthews (one-versus-rest)."""
+    TP, FP, FN, TN = counts["TP"], counts["FP"], counts["FN"], counts["TN"]
+    den = ((TP + FP) * (TP + FN) * (TN + FP) * (TN + FN)) ** 0.5
+    return float((TP * TN - FP * FN) / den) if den else 0.0
+
+
+def im_table_from_aligned(pairs) -> Dict[str, Dict]:
+    """BI, MK e MCC por classe UPOS somente sobre pares de palavras alinhados
+    pelo conll18_ud_eval.py (ver src/ud_alignment.py).
+
+    Substitui a comparação por posição de ``compute_im_table`` quando a
+    ferramenta re-tokeniza o texto: comparar listas por índice desloca todos os
+    rótulos após a primeira divergência de tokenização, o que invalida BI/MK.
+    ``support`` é o número de palavras gold alinhadas de cada classe.
+    """
+    gold = [p.gold_upos for p in pairs]
+    pred = [p.system_upos for p in pairs]
+    labels = sorted(set(gold))
+    cps = confusion_per_label(gold, pred, sorted(set(gold) | set(pred)))
+    out = {}
+    for lab in labels:
+        c = cps[lab]
+        out[lab] = {**c, **informedness_markedness(c), "mcc": mcc(c), "support": int(c["TP"] + c["FN"])}
+    return out
