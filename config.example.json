@@ -1,0 +1,22 @@
+{
+  "seed": 42,
+  "paths": {
+    "ud_gold_conllu": "data/pt_bosque-ud-test.conllu",
+    "wikiner_path": "data/aij-wikiner-pt-wp3",
+    "udpipe_model_path": "models/portuguese-bosque-ud-2.5-191206.udpipe",
+    "outputs_dir": "outputs",
+    "results_dir": "results",
+    "tools_dir": "tools"
+  },
+  "models": {
+    "spacy": "pt_core_news_lg",
+    "stanza_lang": "pt"
+  },
+  "wikiner": {
+    "max_sentences": 5000
+  },
+  "ud_eval": {
+    "download_url": "https://universaldependencies.org/conll18/conll18_ud_eval.py",
+    "verbose": true
+  }
+}

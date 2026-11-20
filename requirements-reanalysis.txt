@@ -1,0 +1,5 @@
+# Dependências mínimas para reanalysis.py e tests/ (não executam modelos)
+numpy>=1.26
+scikit-learn>=1.3
+seqeval>=1.2.2
+pytest>=7

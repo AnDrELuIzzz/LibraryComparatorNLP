@@ -18,7 +18,13 @@ logger = logging.getLogger("PIPELINE")
 
 def controlled_im_analysis(config: dict) -> dict:
     """
-    Mantém sua análise controlada (gold tokens) para IM em UPOS e NER.
+    Análise controlada (tokens gold) de IM em UPOS e NER, mantida por compatibilidade.
+
+    ATENÇÃO: para Stanza e UDPipe, o texto é re-tokenizado e as listas são
+    comparadas por posição; qualquer divergência de tokenização desloca os
+    rótulos seguintes, o que invalida BI/MK dessas ferramentas. Os valores
+    reportados no artigo vêm de reanalysis.py (pares alinhados pelo
+    conll18_ud_eval.py; ver src/informedness_markedness.im_table_from_aligned).
     """
     ud_gold = config["paths"]["ud_gold_conllu"]
     gold_sents = read_conllu(ud_gold)
@@ -100,6 +106,10 @@ def main():
 
     logger.info("6) Plotando gráficos...")
     os.system("python -m src.plot_results")
+
+    logger.info("7) Reanálise sobre as saídas salvas (sobreposição, bootstrap, BI/MK alinhados)...")
+    import reanalysis
+    reanalysis.main()
 
 
 if __name__ == "__main__":

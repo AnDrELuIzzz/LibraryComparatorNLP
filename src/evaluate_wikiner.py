@@ -28,15 +28,64 @@ def token_level_prf1(gold: List[str], pred: List[str]) -> Dict:
         "support_total": int(sum(support)) if hasattr(support, "__len__") else None
     }
 
-def try_seqeval_spans(gold_sents: List[List[str]], pred_sents: List[List[str]]) -> Dict | None:
+def iob1_to_iob2(tags: List[str]) -> List[str]:
+    """Converte rótulos IOB1 (CoNLL-2003/WikiNER: I- em quase todos os tokens; B- só
+    entre entidades adjacentes do mesmo tipo) para IOB2 (B- no primeiro token de toda
+    entidade), esquema em que o spaCy produz suas predições (Tjong Kim Sang; Veenstra, 1999)."""
+    out, prev = [], "O"
+    for t in tags:
+        if t.startswith("I-") and (prev == "O" or prev[2:] != t[2:]):
+            t = "B-" + t[2:]
+        out.append(t)
+        prev = t
+    return out
+
+
+def read_bio_predictions(path: str) -> List[List[str]]:
+    """Lê predições salvas (uma sentença por linha, tokens 'palavra|rótulo')."""
+    sents = []
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            items = [it for it in line.rstrip("\n").split(" ") if it]
+            sents.append([it.rsplit("|", 1)[1] for it in items])
+    return sents
+
+
+def score_ner(gold_sents: List[List[str]], pred_sents: List[List[str]]) -> Dict:
+    """Métricas por token (gold em IOB2 e, para transparência, no IOB1 original) e por entidade."""
+    gold_flat, pred_flat, g_sents, p_sents = [], [], [], []
+    for g, p in zip(gold_sents, pred_sents):
+        L = min(len(g), len(p))
+        g_sents.append(g[:L]); p_sents.append(p[:L])
+        gold_flat.extend(g[:L]); pred_flat.extend(p[:L])
+    gold_iob2_sents = [iob1_to_iob2(g) for g in g_sents]
+    gold_iob2_flat = [t for g in gold_iob2_sents for t in g]
+    return {
+        "token_level": token_level_prf1(gold_iob2_flat, pred_flat),
+        "token_level_gold_iob1": token_level_prf1(gold_flat, pred_flat),
+        "span_level": try_seqeval_spans(gold_iob2_sents, p_sents),
+        "span_level_gold_iob1": try_seqeval_spans(g_sents, p_sents),
+        "span_level_strict_iob2": try_seqeval_spans(gold_iob2_sents, p_sents, strict=True),
+        "n_sentences": len(g_sents),
+        "n_tokens": len(gold_flat),
+    }
+
+
+def try_seqeval_spans(gold_sents: List[List[str]], pred_sents: List[List[str]], strict: bool = False) -> Dict | None:
+    """Métricas por entidade com o seqeval: modo padrão (compatível com o conlleval)
+    ou, com strict=True, modo estrito com o esquema IOB2."""
     try:
         from seqeval.metrics import precision_score, recall_score, f1_score, classification_report
+        kw = {}
+        if strict:
+            from seqeval.scheme import IOB2
+            kw = {"mode": "strict", "scheme": IOB2}
         return {
-            "precision": float(precision_score(gold_sents, pred_sents)),
-            "recall": float(recall_score(gold_sents, pred_sents)),
-            "f1": float(f1_score(gold_sents, pred_sents)),
-            "report": classification_report(gold_sents, pred_sents, digits=4),
-            "note": "seqeval (span-level)"
+            "precision": float(precision_score(gold_sents, pred_sents, **kw)),
+            "recall": float(recall_score(gold_sents, pred_sents, **kw)),
+            "f1": float(f1_score(gold_sents, pred_sents, **kw)),
+            "report": classification_report(gold_sents, pred_sents, digits=4, **kw),
+            "note": "seqeval (span-level, strict IOB2)" if strict else "seqeval (span-level)"
         }
     except Exception:
         return None
@@ -48,31 +97,13 @@ def eval_wikiner_one(framework: str, model_name: str, wikiner_path: str, max_sen
     wrapper = get_model_wrapper(framework, model_name)
     wrapper.load_model()
 
-    gold_flat, pred_flat = [], []
-    gold_sents, pred_sents = [], []
+    gold_sents = [s["tags"] for s in samples]
+    pred_sents = [wrapper.ner_gold(s["tokens"]) for s in samples]
 
-    for s in samples:
-        tokens = s["tokens"]
-        gold = s["tags"]
-        pred = wrapper.ner_gold(tokens)
-        L = min(len(gold), len(pred))
-        gold = gold[:L]
-        pred = pred[:L]
-
-        gold_flat.extend(gold)
-        pred_flat.extend(pred)
-        gold_sents.append(gold)
-        pred_sents.append(pred)
-
-    span_metrics = try_seqeval_spans(gold_sents, pred_sents)
-    tok_metrics = token_level_prf1(gold_flat, pred_flat)
-
-    return {
-        "framework": framework,
-        "model": model_name,
-        "token_level": tok_metrics,
-        "span_level": span_metrics
-    }
+    # O gold do WikiNER está em IOB1; score_ner converte-o para IOB2 antes da
+    # avaliação por token (e mantém o resultado com o IOB1 original em
+    # "token_level_gold_iob1"). O seqeval por entidade não depende da conversão.
+    return {"framework": framework, "model": model_name, **score_ner(gold_sents, pred_sents)}
 
 def eval_all_wikiner(config: Dict) -> Dict:
     results_dir = os.path.join(config["paths"]["results_dir"], "ner")

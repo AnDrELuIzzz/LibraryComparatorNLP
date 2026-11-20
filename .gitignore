@@ -82,3 +82,8 @@ config.json
 #outros arquivos de configuração específicos do projeto
 
 .data/
+# Partições oficiais do UD baixadas por scripts/download_ud_bosque.py (grandes; não versionar)
+data/ud_releases/
+
+# Dependências da reanálise (exceção à regra requirements*.txt acima)
+!requirements-reanalysis.txt
