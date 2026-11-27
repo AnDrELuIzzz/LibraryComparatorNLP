@@ -10,10 +10,11 @@ Gera, em results/reanalysis/, os números das análises complementares do artigo
   - BI, MK e MCC por classe UPOS sobre palavras alinhadas;
   - NER do spaCy por token (gold IOB1 original e convertido para IOB2) e por entidade.
 
-Uso:  python reanalysis.py            (gera JSON e tabelas em Markdown)
+Uso:  python reanalysis.py [--outputs-dir outputs] [--results-dir results]
 """
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import sys
@@ -22,7 +23,7 @@ from typing import Dict
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from src.bosque_overlap import load_origin_table, overlap_summary, subsets
-from src.data_loader import DataLoader
+from src.data_loader import load_wikiner
 from src.evaluate_wikiner import read_bio_predictions, score_ner
 from src.informedness_markedness import im_table_from_aligned
 from src.paired_bootstrap import DEFAULT_B, DEFAULT_SEED, paired_bootstrap
@@ -33,12 +34,14 @@ from src.ud_alignment import aligned_words
 ROOT = os.path.dirname(os.path.abspath(__file__))
 SYSTEMS = ("spacy", "stanza", "udpipe")
 GOLD = os.path.join(ROOT, "data", "pt_bosque-ud-test.conllu")
+OUTPUTS = os.path.join(ROOT, "outputs")
+RESULTS = os.path.join(ROOT, "results")
 WIKINER = os.path.join(ROOT, "data", "aij-wikiner-pt-wp3")
 WIKINER_MAX_LINES = 5000  # mesmo valor de config["wikiner"]["max_sentences"] usado no pipeline
 
 
-def system_path(name: str) -> str:
-    return os.path.join(ROOT, "outputs", name, "bosque_pred_e2e.conllu")
+def system_path(name: str, outputs_dir: str = OUTPUTS) -> str:
+    return os.path.join(outputs_dir, name, "bosque_pred_e2e.conllu")
 
 
 def bosque_stats(gold_path: str, word_sent) -> Dict:
@@ -57,7 +60,7 @@ def bosque_stats(gold_path: str, word_sent) -> Dict:
             "lemmas_with_uppercase": upper_lemmas, "lemmas_with_uppercase_pct": 100 * upper_lemmas / len(word_sent)}
 
 
-def run_reanalysis(B: int = DEFAULT_B, seed: int = DEFAULT_SEED) -> Dict:
+def run_reanalysis(B: int = DEFAULT_B, seed: int = DEFAULT_SEED, outputs_dir: str = OUTPUTS) -> Dict:
     word_sent = gold_word_sent_ids(GOLD)
     origin = load_origin_table()
     subs = subsets(origin, "2.5")
@@ -65,7 +68,7 @@ def run_reanalysis(B: int = DEFAULT_B, seed: int = DEFAULT_SEED) -> Dict:
     pairs = {}
     official = {}
     for name in SYSTEMS:
-        pairs[name], _, scores = aligned_words(GOLD, system_path(name))
+        pairs[name], _, scores = aligned_words(GOLD, system_path(name, outputs_dir))
         official[name] = {k: {"precision": 100 * v.precision, "recall": 100 * v.recall, "f1": 100 * v.f1}
                           for k, v in scores.items()}
 
@@ -83,16 +86,15 @@ def run_reanalysis(B: int = DEFAULT_B, seed: int = DEFAULT_SEED) -> Dict:
     out["bootstrap"] = comparisons
 
     out["intersection"] = intersection_accuracy(pairs)
-    out["lemma_case_insensitive"] = {n: lemma_case_insensitive(GOLD, system_path(n)) for n in SYSTEMS}
-    out["mwt_lines"] = {n: mwt_count(system_path(n)) for n in SYSTEMS}
-    out["unexpanded_contractions"] = {n: unexpanded_contractions(GOLD, system_path(n)) for n in SYSTEMS}
+    out["lemma_case_insensitive"] = {n: lemma_case_insensitive(GOLD, system_path(n, outputs_dir)) for n in SYSTEMS}
+    out["mwt_lines"] = {n: mwt_count(system_path(n, outputs_dir)) for n in SYSTEMS}
+    out["unexpanded_contractions"] = {n: unexpanded_contractions(GOLD, system_path(n, outputs_dir)) for n in SYSTEMS}
     out["im_aligned"] = {n: im_table_from_aligned(pairs[n]) for n in SYSTEMS}
 
     out["corpus_stats"] = bosque_stats(GOLD, word_sent)
 
-    gold_ner = [s["tags"] for s in
-                DataLoader(conllu_path="(unused)", wikiner_path=WIKINER).load_wikiner(max_sentences=WIKINER_MAX_LINES)]
-    pred_ner = read_bio_predictions(os.path.join(ROOT, "outputs", "spacy", "wikiner_pred.bio"))
+    gold_ner = [s["tags"] for s in load_wikiner(WIKINER, max_sentences=WIKINER_MAX_LINES)]
+    pred_ner = read_bio_predictions(os.path.join(outputs_dir, "spacy", "wikiner_pred.bio"))
     if len(gold_ner) != len(pred_ner):
         raise ValueError("Predições do WikiNER desalinhadas com o gold")
     ner = score_ner(gold_ner, pred_ner)
@@ -124,7 +126,7 @@ def to_markdown(r: Dict) -> str:
         L.append(f"| {rel} | {cell('train')} | {cell('dev')} | {cell('test')} | {cell('absent')} |")
     L += ["", f"Variedade × partição 2.5: {r['overlap']['variety_by_split_2.5']}", ""]
 
-    L += ["## Recall (%) por subconjunto (Tabela 7 do artigo)", "",
+    L += ["## Recall (%) por subconjunto (Tabela 6 do artigo)", "",
           "| Subconjunto (sentenças) | spaCy UPOS / UAS / LAS | Stanza UPOS / UAS / LAS | UDPipe UPOS / UAS / LAS |",
           "|---|---|---|---|"]
     labels = {"treino": "Treino", "desenvolvimento": "Desenvolvimento", "ineditas": "Teste, inéditas", "total": "Total"}
@@ -156,7 +158,7 @@ def to_markdown(r: Dict) -> str:
     L += ["", f"Linhas de tokens multipalavra nos arquivos preditos: {r['mwt_lines']}",
           f"Tokens multipalavra da referência deixados sem expansão: {r['unexpanded_contractions']}", ""]
 
-    L += ["## BI e MK por classe UPOS sobre palavras alinhadas (Tabela 5 do artigo)", "",
+    L += ["## BI e MK por classe UPOS sobre palavras alinhadas (Seção 4.2 do artigo)", "",
           "| Classe | spaCy BI | spaCy MK | Stanza BI | Stanza MK | UDPipe BI | UDPipe MK | n (Sp / St / UD) |",
           "|---|---|---|---|---|---|---|---|"]
     classes = sorted(set().union(*(r["im_aligned"][sy].keys() for sy in SYSTEMS)))
@@ -179,16 +181,22 @@ def to_markdown(r: Dict) -> str:
     return "\n".join(L)
 
 
-def main():
-    r = run_reanalysis()
-    out_dir = os.path.join(ROOT, "results", "reanalysis")
+def main(argv=None, quiet: bool = False):
+    ap = argparse.ArgumentParser(description="Reanálise a partir das saídas salvas (sem rodar modelos).")
+    ap.add_argument("--outputs-dir", default=OUTPUTS, help="onde estão <ferramenta>/bosque_pred_e2e.conllu")
+    ap.add_argument("--results-dir", default=RESULTS, help="a reanálise é gravada em <results-dir>/reanalysis/")
+    args = ap.parse_args(argv)
+    r = run_reanalysis(outputs_dir=args.outputs_dir)
+    out_dir = os.path.join(args.results_dir, "reanalysis")
     os.makedirs(out_dir, exist_ok=True)
     with open(os.path.join(out_dir, "reanalysis.json"), "w", encoding="utf-8") as f:
         json.dump(r, f, indent=2, ensure_ascii=False)
     md = to_markdown(r)
     with open(os.path.join(out_dir, "tabelas.md"), "w", encoding="utf-8") as f:
         f.write(md)
-    print(md)
+    if not quiet:
+        print(md)
+    print(f"Reanálise gravada em {out_dir}/")
 
 
 if __name__ == "__main__":

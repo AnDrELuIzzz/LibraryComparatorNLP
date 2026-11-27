@@ -1,19 +1,23 @@
 # -*- coding: utf-8 -*-
+"""Adaptadores das três ferramentas para uma interface comum.
+
+``parse_raw(texto)`` devolve, por sentença, um dicionário com tokens, lemas (em minúsculas),
+UPOS, traços, núcleos, relações, offsets e tokens multipalavra (MWT). Só o spaCy tem NER
+para o português; ``SpacyWrapper.ner_gold`` rotula tokens já segmentados (WikiNER).
+"""
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import List, Tuple, Optional, Dict
+from typing import List, Tuple, Dict
 import logging
-
-from .lemma_rules import rulebased_lemmatization
 
 logger = logging.getLogger(__name__)
 
 
 class NLPModelWrapper(ABC):
-    def __init__(self, model_name: str, device: str = "cpu"):
+    def __init__(self, model_name: str, model_dir: str | None = None):
         self.model_name = model_name
-        self.device = device
+        self.model_dir = model_dir
         self.model = None
 
     @abstractmethod
@@ -22,22 +26,6 @@ class NLPModelWrapper(ABC):
 
     @abstractmethod
     def parse_raw(self, text: str) -> List[Dict]:
-        raise NotImplementedError
-
-    @abstractmethod
-    def pos_tag_gold(self, tokens: List[str]) -> List[str]:
-        raise NotImplementedError
-
-    @abstractmethod
-    def lemmatize_gold(self, tokens: List[str]) -> List[str]:
-        raise NotImplementedError
-
-    @abstractmethod
-    def dependency_parse_gold(self, tokens: List[str]) -> Tuple[List[int], List[str]]:
-        raise NotImplementedError
-
-    @abstractmethod
-    def ner_gold(self, tokens: List[str]) -> List[str]:
         raise NotImplementedError
 
 
@@ -140,34 +128,6 @@ class SpacyWrapper(NLPModelWrapper):
                 doc = proc(doc)
         return doc
 
-    def pos_tag_gold(self, tokens: List[str]) -> List[str]:
-        doc = self._process_with_gold_tokens(tokens)
-        return [t.pos_ for t in doc]
-
-    def lemmatize_gold(self, tokens: List[str]) -> List[str]:
-        doc = self._process_with_gold_tokens(tokens)
-        lemmas = []
-        for tok in doc:
-            surface = tok.text
-            lemma_spacy = (tok.lemma_ or "").lower()
-            if lemma_spacy and lemma_spacy != surface.lower():
-                lemmas.append(lemma_spacy)
-            else:
-                lemmas.append(rulebased_lemmatization(surface))
-        return lemmas
-
-    def dependency_parse_gold(self, tokens: List[str]) -> Tuple[List[int], List[str]]:
-        doc = self._process_with_gold_tokens(tokens)
-        heads = []
-        deprels = []
-        for t in doc:
-            deprels.append(t.dep_ or "dep")
-            if t.head.i == t.i:
-                heads.append(0)
-            else:
-                heads.append(t.head.i + 1)
-        return heads, deprels
-
     def ner_gold(self, tokens: List[str]) -> List[str]:
         doc = self._process_with_gold_tokens(tokens)
         tags = ["O"] * len(tokens)
@@ -182,13 +142,12 @@ class StanzaWrapper(NLPModelWrapper):
     def load_model(self):
         import stanza
 
-        processors = "tokenize,mwt,pos,lemma,depparse"
-        try:
-            self.model = stanza.Pipeline(self.model_name, processors=processors, download_method=None)
-        except Exception:
-            stanza.download(self.model_name)
-            self.model = stanza.Pipeline(self.model_name, processors=processors)
-        logger.info(f"Stanza loaded: {self.model_name} (sem NER)")
+        # download_method=None: usa só os modelos já presentes em model_dir (baixados por
+        # src/resources.py na versão fixada em config.json), sem atualizá-los.
+        kw = {"dir": self.model_dir} if self.model_dir else {}
+        self.model = stanza.Pipeline(self.model_name, processors="tokenize,mwt,pos,lemma,depparse",
+                                     download_method=None, **kw)
+        logger.info(f"Stanza loaded: {self.model_name} ({self.model_dir or 'diretório padrão'}; sem NER)")
 
     def _ensure(self):
         if self.model is None:
@@ -248,29 +207,6 @@ class StanzaWrapper(NLPModelWrapper):
                 }
             )
         return out
-
-    def pos_tag_gold(self, tokens: List[str]) -> List[str]:
-        self._ensure()
-        doc = self.model(" ".join(tokens))
-        return [w.upos for sent in doc.sentences for w in sent.words]
-
-    def lemmatize_gold(self, tokens: List[str]) -> List[str]:
-        self._ensure()
-        doc = self.model(" ".join(tokens))
-        return [w.lemma for sent in doc.sentences for w in sent.words]
-
-    def dependency_parse_gold(self, tokens: List[str]) -> Tuple[List[int], List[str]]:
-        self._ensure()
-        doc = self.model(" ".join(tokens))
-        heads, deprels = [], []
-        for sent in doc.sentences:
-            for w in sent.words:
-                heads.append(int(w.head))
-                deprels.append(w.deprel)
-        return heads, deprels
-
-    def ner_gold(self, tokens: List[str]) -> List[str]:
-        return ["O"] * len(tokens)
 
 
 class UDPipeWrapper(NLPModelWrapper):
@@ -361,50 +297,13 @@ class UDPipeWrapper(NLPModelWrapper):
             )
         return out
 
-    def _process(self, text: str) -> str:
-        self._ensure()
-        return self.pipeline.process(text)
 
-    def _field(self, conllu: str, idx: int, as_int: bool = False):
-        vals = []
-        for line in conllu.strip().split("\n"):
-            if line and not line.startswith("#") and line[0].isdigit():
-                parts = line.split("\t")
-                if "-" in parts[0] or "." in parts[0]:
-                    continue
-                val = parts[idx] if idx < len(parts) else "_"
-                if as_int:
-                    try:
-                        val = int(val)
-                    except Exception:
-                        val = 0
-                vals.append(val)
-        return vals
-
-    def pos_tag_gold(self, tokens: List[str]) -> List[str]:
-        conllu = self._process(" ".join(tokens))
-        return self._field(conllu, 3)
-
-    def lemmatize_gold(self, tokens: List[str]) -> List[str]:
-        conllu = self._process(" ".join(tokens))
-        return self._field(conllu, 2)
-
-    def dependency_parse_gold(self, tokens: List[str]) -> Tuple[List[int], List[str]]:
-        conllu = self._process(" ".join(tokens))
-        heads = self._field(conllu, 6, as_int=True)
-        deprels = self._field(conllu, 7)
-        return heads, deprels
-
-    def ner_gold(self, tokens: List[str]) -> List[str]:
-        return ["O"] * len(tokens)
-
-
-def get_model_wrapper(framework: str, model_name: str, device: str = "cpu") -> NLPModelWrapper:
+def get_model_wrapper(framework: str, model_name: str, model_dir: str | None = None) -> NLPModelWrapper:
     f = framework.lower()
     if f == "spacy":
-        return SpacyWrapper(model_name, device)
+        return SpacyWrapper(model_name)
     if f == "stanza":
-        return StanzaWrapper(model_name, device)
+        return StanzaWrapper(model_name, model_dir)
     if f == "udpipe":
-        return UDPipeWrapper(model_name, device)
+        return UDPipeWrapper(model_name)
     raise ValueError(f"Unknown framework: {framework}")

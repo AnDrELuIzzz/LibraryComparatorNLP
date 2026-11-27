@@ -13,7 +13,7 @@ Teste do Bosque: 1167 sentenças, 27604 palavras sintáticas, 2015 tokens multip
 
 Variedade × partição 2.5: {'PB_dev': 288, 'PB_test': 111, 'PB_train': 122, 'PE_train': 646}
 
-## Recall (%) por subconjunto (Tabela 7 do artigo)
+## Recall (%) por subconjunto (Tabela 6 do artigo)
 
 | Subconjunto (sentenças) | spaCy UPOS / UAS / LAS | Stanza UPOS / UAS / LAS | UDPipe UPOS / UAS / LAS |
 |---|---|---|---|
@@ -82,7 +82,7 @@ Variedade × partição 2.5: {'PB_dev': 288, 'PB_test': 111, 'PB_train': 122, 'P
 Linhas de tokens multipalavra nos arquivos preditos: {'spacy': 0, 'stanza': 2018, 'udpipe': 2034}
 Tokens multipalavra da referência deixados sem expansão: {'spacy': {'gold_multiword_tokens': 2015, 'unexpanded': 2015}, 'stanza': {'gold_multiword_tokens': 2015, 'unexpanded': 7}, 'udpipe': {'gold_multiword_tokens': 2015, 'unexpanded': 0}}
 
-## BI e MK por classe UPOS sobre palavras alinhadas (Tabela 5 do artigo)
+## BI e MK por classe UPOS sobre palavras alinhadas (Seção 4.2 do artigo)
 
 | Classe | spaCy BI | spaCy MK | Stanza BI | Stanza MK | UDPipe BI | UDPipe MK | n (Sp / St / UD) |
 |---|---|---|---|---|---|---|---|

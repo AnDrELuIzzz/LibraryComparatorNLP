@@ -40,18 +40,6 @@ def informedness_markedness(counts: Dict[str, int]) -> Dict[str, float]:
         "markedness": markedness
     }
 
-def compute_im_table(gold: List[str], pred: List[str], ignore: set | None = None) -> Dict[str, Dict]:
-    ignore = ignore or set()
-    labels = sorted(set(gold) | set(pred))
-    labels = [l for l in labels if l not in ignore]
-
-    cps = confusion_per_label(gold, pred, labels)
-    out = {}
-    for lab in labels:
-        out[lab] = {**cps[lab], **informedness_markedness(cps[lab])}
-    return out
-
-
 def mcc(counts: Dict[str, int]) -> float:
     """Coeficiente de correlação de Matthews (one-versus-rest)."""
     TP, FP, FN, TN = counts["TP"], counts["FP"], counts["FN"], counts["TN"]
@@ -63,9 +51,9 @@ def im_table_from_aligned(pairs) -> Dict[str, Dict]:
     """BI, MK e MCC por classe UPOS somente sobre pares de palavras alinhados
     pelo conll18_ud_eval.py (ver src/ud_alignment.py).
 
-    Substitui a comparação por posição de ``compute_im_table`` quando a
-    ferramenta re-tokeniza o texto: comparar listas por índice desloca todos os
-    rótulos após a primeira divergência de tokenização, o que invalida BI/MK.
+    Usar só os pares alinhados é necessário porque cada ferramenta tokeniza o
+    texto à sua maneira: comparar listas por índice deslocaria todos os rótulos
+    após a primeira divergência de tokenização, o que invalidaria BI/MK.
     ``support`` é o número de palavras gold alinhadas de cada classe.
     """
     gold = [p.gold_upos for p in pairs]

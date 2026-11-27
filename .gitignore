@@ -1,89 +1,24 @@
-# Arquivos de ambiente Python
-.env
-.venv
-venv
-env
-ENV
-
-
-# Diretório de ambientes virtuais
-/__pycache__/
-**/__pycache__/
+# Python
+__pycache__/
 *.py[cod]
-*.pyo
-
-# Arquivos de configuração de ambientes virtuais
+.pytest_cache/
 *.egg-info/
-*.egg
-.Python
 build/
 dist/
-*.whl
-*.sh
 
-# Dependências instaladas (p.e., se usar pip freeze)
-# arquivo de dependências -- opcional, descomente se desejar
-# requirements.txt
-requirements*.txt
-requirements/*
+# Ambientes virtuais
+.venv/
+venv/
+env/
+.env
 
-# Modelos e caches de frameworks
-# HuggingFace transformers cache
-/.cache/huggingface/hub/
-# Numpy, torch, tensorflow caches
-/.cache/
-**/.cache/
-**/.keras/
-**/.keras_cache/
-
-# Modelos treinados, checkpoints e pesos (não versionar)
-models/
-*.pt
-*.bin
-*.safetensors
-*.ckpt
-*.pth
-# Cache de modelos
-*.model
-
-# Arquivos temporários e de trabalho
-*.log
-*.tmp
-*.bak
-*.swp
-*~ 
-
-# Arquivos do sistema operacional
+# IDEs / sistema
+.idea/
+.vscode/
 .DS_Store
-Thumbs.db
-ehthumbs.db
-desktop.ini
+*.swp
+*~
 
-# Arquivos de resultados, saídas e relatórios (se não quiser versionar)
-
-output/
-*.csv
-# *.json
-# .txt
-*.tex
-*.pyc
-
-# Arquivos de configuração (senhas, chaves)
-config.json
-*.pem
-*.key
-*.env
-
-# Outros arquivos de backup ou temporários
-*.bak
-*.old
-.cache
-
-#outros arquivos de configuração específicos do projeto
-
-.data/
-# Partições oficiais do UD baixadas por scripts/download_ud_bosque.py (grandes; não versionar)
+# Baixados automaticamente (scripts/download_models.py e scripts/download_ud_bosque.py)
+models/
 data/ud_releases/
-
-# Dependências da reanálise (exceção à regra requirements*.txt acima)
-!requirements-reanalysis.txt

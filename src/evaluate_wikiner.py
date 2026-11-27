@@ -7,13 +7,10 @@ import logging
 
 from sklearn.metrics import precision_recall_fscore_support
 
-from .data_loader import DataLoader
-from .model_wrapper import get_model_wrapper
+from .data_loader import load_wikiner
 
 logger = logging.getLogger(__name__)
 
-def ensure_dir(p: str):
-    os.makedirs(p, exist_ok=True)
 
 def token_level_prf1(gold: List[str], pred: List[str]) -> Dict:
     labels = sorted(set(gold + pred) - {"O"})
@@ -90,37 +87,27 @@ def try_seqeval_spans(gold_sents: List[List[str]], pred_sents: List[List[str]], 
     except Exception:
         return None
 
-def eval_wikiner_one(framework: str, model_name: str, wikiner_path: str, max_sentences: int = 5000) -> Dict:
-    loader = DataLoader(conllu_path="(unused)", wikiner_path=wikiner_path)
-    samples = loader.load_wikiner(max_sentences=max_sentences)
-
-    wrapper = get_model_wrapper(framework, model_name)
-    wrapper.load_model()
-
-    gold_sents = [s["tags"] for s in samples]
-    pred_sents = [wrapper.ner_gold(s["tokens"]) for s in samples]
-
-    # O gold do WikiNER está em IOB1; score_ner converte-o para IOB2 antes da
-    # avaliação por token (e mantém o resultado com o IOB1 original em
-    # "token_level_gold_iob1"). O seqeval por entidade não depende da conversão.
-    return {"framework": framework, "model": model_name, **score_ner(gold_sents, pred_sents)}
-
 def eval_all_wikiner(config: Dict) -> Dict:
+    """Avalia as predições salvas por run_pipeline (outputs/<ferramenta>/wikiner_pred.bio).
+
+    O gold do WikiNER está em IOB1; score_ner converte-o para IOB2 antes da avaliação por
+    token (e mantém o resultado com o IOB1 original em "token_level_gold_iob1"). O seqeval
+    por entidade não depende da conversão.
+    """
+    from .run_pipeline import NER_SYSTEMS, ud_systems
+
     results_dir = os.path.join(config["paths"]["results_dir"], "ner")
-    ensure_dir(results_dir)
-
-    wikiner_path = config["paths"]["wikiner_path"]
+    os.makedirs(results_dir, exist_ok=True)
     max_sents = config.get("wikiner", {}).get("max_sentences", 5000)
-
-    systems = {
-        "spacy": ("spacy", config["models"]["spacy"]),
-        "stanza": ("stanza", config["models"]["stanza_lang"]),
-        "udpipe": ("udpipe", config["paths"]["udpipe_model_path"]),
-    }
+    gold_sents = [s["tags"] for s in load_wikiner(config["paths"]["wikiner_path"], max_sentences=max_sents)]
 
     all_results = {}
-    for key, (fw, model) in systems.items():
-        metrics = eval_wikiner_one(fw, model, wikiner_path, max_sentences=max_sents)
+    for key in NER_SYSTEMS:
+        fw, model = ud_systems(config)[key]
+        pred_sents = read_bio_predictions(os.path.join(config["paths"]["outputs_dir"], key, "wikiner_pred.bio"))
+        if len(pred_sents) != len(gold_sents):
+            raise ValueError(f"[WikiNER] predições de {key} desalinhadas com o gold")
+        metrics = {"framework": fw, "model": model, **score_ner(gold_sents, pred_sents)}
         all_results[key] = metrics
         out_path = os.path.join(results_dir, f"{key}.json")
         with open(out_path, "w", encoding="utf-8") as f:
