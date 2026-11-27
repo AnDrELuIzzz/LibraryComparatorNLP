@@ -1,115 +1,75 @@
 # -*- coding: utf-8 -*-
+"""Pipeline completo: executa spaCy, Stanza e UDPipe, avalia e gera a reanálise.
+
+  1. baixa os modelos que faltarem (src/resources.py);
+  2. processa o texto bruto do teste do Bosque e o WikiNER (outputs/);
+  3. avalia com o conll18_ud_eval.py oficial (results/ud_eval/) e o seqeval (results/ner/);
+  4. grava o relatório consolidado (results/full_results.json, results/report.txt);
+  5. roda reanalysis.py sobre as saídas recém-geradas (results/reanalysis/).
+
+Uso:  python main.py [--config config.json]
+"""
+from __future__ import annotations
+
+import argparse
 import json
 import logging
 import os
+import sys
 
-from src.version import print_versions
-from src.run_pipeline import run_all_pipelines
-from src.evaluate_ud_official import eval_all_ud
-from src.evaluate_wikiner import eval_all_wikiner
-from src.informedness_markedness import compute_im_table
-from src.conllu_utils import read_conllu
-from src.model_wrapper import get_model_wrapper
-from src.report import save_report
+ROOT = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, ROOT)
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("PIPELINE")
 
 
-def controlled_im_analysis(config: dict) -> dict:
-    """
-    Análise controlada (tokens gold) de IM em UPOS e NER, mantida por compatibilidade.
-
-    ATENÇÃO: para Stanza e UDPipe, o texto é re-tokenizado e as listas são
-    comparadas por posição; qualquer divergência de tokenização desloca os
-    rótulos seguintes, o que invalida BI/MK dessas ferramentas. Os valores
-    reportados no artigo vêm de reanalysis.py (pares alinhados pelo
-    conll18_ud_eval.py; ver src/informedness_markedness.im_table_from_aligned).
-    """
-    ud_gold = config["paths"]["ud_gold_conllu"]
-    gold_sents = read_conllu(ud_gold)
-
-    gold_upos = []
-    tokens_flat = []
-    for s in gold_sents:
-        for t in s.tokens:
-            gold_upos.append(t.upos)
-            tokens_flat.append(t.form)
-
-    systems = {
-        "spacy": ("spacy", config["models"]["spacy"]),
-        "stanza": ("stanza", config["models"]["stanza_lang"]),
-        "udpipe": ("udpipe", config["paths"]["udpipe_model_path"]),
-    }
-
-    out = {}
-
-    # UPOS: gold tokens
-    for key, (fw, model) in systems.items():
-        wrapper = get_model_wrapper(fw, model)
-        wrapper.load_model()
-        pred_upos = wrapper.pos_tag_gold(tokens_flat)
-        L = min(len(gold_upos), len(pred_upos))
-        table = compute_im_table(gold_upos[:L], pred_upos[:L], ignore={"_"})
-        for lab, d in table.items():
-            d["support"] = int(d["TP"] + d["FN"])
-        out[f"upos_{key}"] = table
-
-    # NER: WikiNER gold tokens
-    from src.data_loader import DataLoader
-    loader = DataLoader(conllu_path=ud_gold, wikiner_path=config["paths"]["wikiner_path"])
-    samples = loader.load_wikiner(max_sentences=config.get("wikiner", {}).get("max_sentences", 5000))
-
-    for key, (fw, model) in systems.items():
-        wrapper = get_model_wrapper(fw, model)
-        wrapper.load_model()
-
-        gold_tags = []
-        pred_tags = []
-        for s in samples:
-            tokens = s["tokens"]
-            g = s["tags"]
-            p = wrapper.ner_gold(tokens)
-            L = min(len(g), len(p))
-            gold_tags.extend(g[:L])
-            pred_tags.extend(p[:L])
-
-        table = compute_im_table(gold_tags, pred_tags, ignore={"O"})
-        for lab, d in table.items():
-            d["support"] = int(d["TP"] + d["FN"])
-        out[f"ner_{key}"] = table
-
-    return out
-
-
-def main():
-    with open("config.json", "r", encoding="utf-8") as f:
+def load_config(path: str) -> dict:
+    """Lê o config e torna absolutos os caminhos relativos (relativos à raiz do repositório)."""
+    with open(path, "r", encoding="utf-8") as f:
         config = json.load(f)
+    config["paths"] = {k: v if os.path.isabs(v) else os.path.join(ROOT, v) for k, v in config["paths"].items()}
+    return config
 
-    versions = print_versions()
 
-    logger.info("1) Rodando pipelines (UD end-to-end + WikiNER)...")
+def main(argv=None):
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--config", default=os.path.join(ROOT, "config.json"))
+    args = ap.parse_args(argv)
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+
+    from src.evaluate_ud_official import eval_all_ud
+    from src.evaluate_wikiner import eval_all_wikiner
+    from src.report import save_report
+    from src.resources import ensure_all
+    from src.run_pipeline import run_all_pipelines
+    from src.version import get_versions
+    import reanalysis
+
+    config = load_config(args.config)
+    versions = get_versions()
+    versions["stanza_models"] = f"recursos {config['models']['stanza_resources_version']}"
+    logger.info(f"Versões: {versions}")
+
+    logger.info("1) Conferindo/baixando modelos...")
+    ensure_all(config)
+
+    logger.info("2) Rodando pipelines (UD end-to-end + WikiNER)...")
     run_all_pipelines(config)
 
-    logger.info("2) Avaliação UD oficial (conll18_ud_eval.py)...")
+    logger.info("3) Avaliação UD oficial (conll18_ud_eval.py)...")
     ud_eval_texts = eval_all_ud(config)
 
-    logger.info("3) Avaliação WikiNER (NER)...")
+    logger.info("4) Avaliação WikiNER (NER)...")
     ner_results = eval_all_wikiner(config)
 
-    logger.info("4) Informedness/Markedness (análise controlada)...")
-    im_results = controlled_im_analysis(config)
-
     logger.info("5) Salvando relatório consolidado...")
-    paths = save_report(config, ud_eval_texts, ner_results, im_results, versions)
+    paths = save_report(config, ud_eval_texts, ner_results, versions)
     logger.info(f"Relatórios: {paths}")
 
-    logger.info("6) Plotando gráficos...")
-    os.system("python -m src.plot_results")
-
-    logger.info("7) Reanálise sobre as saídas salvas (sobreposição, bootstrap, BI/MK alinhados)...")
-    import reanalysis
-    reanalysis.main()
+    logger.info("6) Reanálise (sobreposição, bootstrap, BI/MK sobre palavras alinhadas)...")
+    reanalysis.main(["--outputs-dir", config["paths"]["outputs_dir"],
+                     "--results-dir", config["paths"]["results_dir"]], quiet=True)
+    logger.info("Concluído.")
 
 
 if __name__ == "__main__":

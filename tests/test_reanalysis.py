@@ -73,10 +73,12 @@ def test_ner_reproduz_resultado_salvo_e_iob2(reanalysis):
     with open(os.path.join(ROOT, "results", "ner", "spacy.json"), encoding="utf-8") as f:
         saved = json.load(f)
     ner = reanalysis["ner_spacy"]
-    for k in ("precision", "recall", "f1"):
-        assert ner["token_level_gold_iob1"][k] == pytest.approx(saved["token_level"][k], abs=1e-9)
-        assert ner["span_level"][k] == pytest.approx(saved["span_level"][k], abs=1e-9)
-    assert round(ner["token_level"]["f1"], 4) == 0.9336
+    for level in ("token_level", "token_level_gold_iob1", "span_level"):
+        for k in ("precision", "recall", "f1"):
+            assert ner[level][k] == pytest.approx(saved[level][k], abs=1e-9), (level, k)
+    assert round(ner["token_level"]["f1"], 4) == 0.9336            # gold IOB2 (Seção 4.3)
+    assert round(ner["token_level_gold_iob1"]["recall"], 4) == 0.3760  # gold IOB1 (Seção 4.3)
+    assert round(ner["span_level"]["f1"], 4) == 0.9385             # Tabela 5
     for k in ("precision", "recall", "f1"):  # modo estrito IOB2 == modo padrão
         assert ner["span_level_strict_iob2"][k] == pytest.approx(ner["span_level"][k], abs=1e-12)
     assert ner["n_sentences"] == 4701
@@ -134,3 +136,17 @@ def test_estatisticas_citadas(reanalysis):
     assert (ner["n_tokens"], ner["gold_entity_tokens"], ner["gold_B_tags_iob1"]) == (121387, 16030, 13)
     assert reanalysis["subsets"]["spacy"]["ineditas"]["gold_words"] == 2296
     assert reanalysis["subsets"]["spacy"]["fora_do_treino"]["n_sentences"] == 399
+
+
+def test_avaliacao_ner_do_pipeline_reproduz_json(tmp_path):
+    """eval_all_wikiner (usado por main.py) reproduz results/ner/spacy.json a partir das predições salvas."""
+    from main import load_config
+    from src.evaluate_wikiner import eval_all_wikiner
+    config = load_config(os.path.join(ROOT, "config.json"))
+    config["paths"]["results_dir"] = str(tmp_path)
+    new = eval_all_wikiner(config)["spacy"]
+    with open(os.path.join(ROOT, "results", "ner", "spacy.json"), encoding="utf-8") as f:
+        saved = json.load(f)
+    for level in ("token_level", "token_level_gold_iob1", "span_level", "span_level_strict_iob2"):
+        for k in ("precision", "recall", "f1"):
+            assert new[level][k] == pytest.approx(saved[level][k], abs=1e-12), (level, k)

@@ -1,0 +1,12 @@
+# Ambiente completo (pipeline + reanálise), com as versões usadas no artigo (Python 3.12.5).
+# Para só reproduzir os números a partir das saídas salvas, basta requirements-reanalysis.txt.
+#
+# O Stanza depende do PyTorch. Para evitar baixar a versão com CUDA (vários GB), instale
+# antes a versão CPU (é o que `make install` faz):
+#   pip install torch==2.9.1 --index-url https://download.pytorch.org/whl/cpu
+-r requirements-reanalysis.txt
+torch==2.9.1
+spacy==3.8.11
+stanza==1.11.0
+ufal.udpipe==1.4.0.1
+pt_core_news_lg @ https://github.com/explosion/spacy-models/releases/download/pt_core_news_lg-3.8.0/pt_core_news_lg-3.8.0-py3-none-any.whl

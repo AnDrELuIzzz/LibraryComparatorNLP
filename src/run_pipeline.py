@@ -6,7 +6,7 @@ import logging
 from typing import Dict, List, Tuple, Optional
 
 from .model_wrapper import get_model_wrapper
-from .data_loader import DataLoader
+from .data_loader import load_wikiner
 from .conllu_utils import (
     read_conllu,
     build_document_text_from_gold,
@@ -103,6 +103,7 @@ def build_pred_conllu_end2end(
     model_name: str,
     gold_conllu_path: str,
     output_path: str,
+    model_dir: Optional[str] = None,
 ):
     """
     SYSTEM.conllu end-to-end:
@@ -115,7 +116,7 @@ def build_pred_conllu_end2end(
     gold_sents = read_conllu(gold_conllu_path)
     doc_text = build_document_text_from_gold(gold_sents)
 
-    wrapper = get_model_wrapper(framework, model_name)
+    wrapper = get_model_wrapper(framework, model_name, model_dir)
     wrapper.load_model()
 
     pred_sents = wrapper.parse_raw(doc_text)
@@ -224,8 +225,7 @@ def build_pred_wikiner_bio(
     """
     NER em WikiNER avaliado em gold tokens (formato do dataset).
     """
-    loader = DataLoader(conllu_path="(unused)", wikiner_path=wikiner_path)
-    samples = loader.load_wikiner(max_sentences=max_sentences)
+    samples = load_wikiner(wikiner_path, max_sentences=max_sentences)
 
     wrapper = get_model_wrapper(framework, model_name)
     wrapper.load_model()
@@ -239,63 +239,37 @@ def build_pred_wikiner_bio(
     logger.info(f"[{framework}] WikiNER predito salvo em: {output_path}")
 
 
+def ud_systems(config: Dict) -> Dict[str, Tuple[str, str]]:
+    """Ferramenta -> (framework, modelo) para a avaliação UD. Ver também ``model_dirs``."""
+    return {
+        "spacy": ("spacy", config["models"]["spacy"]),
+        "stanza": ("stanza", config["models"]["stanza_lang"]),
+        "udpipe": ("udpipe", config["paths"]["udpipe_model_path"]),
+    }
+
+
+def model_dirs(config: Dict) -> Dict[str, Optional[str]]:
+    """Diretório de modelos por ferramenta (só o Stanza usa um diretório próprio)."""
+    return {"stanza": config["paths"].get("stanza_dir")}
+
+
+# Só o spaCy tem modelo de NER para o português (Stanza 1.11.0 e UDPipe 1 não têm).
+NER_SYSTEMS = ("spacy",)
+
+
 def run_all_pipelines(config: Dict):
     outputs_dir = config["paths"]["outputs_dir"]
-    ensure_dir(outputs_dir)
-
     gold_path = config["paths"]["ud_gold_conllu"]
     wikiner_path = config["paths"]["wikiner_path"]
     max_ner = config.get("wikiner", {}).get("max_sentences", 5000)
 
-    # spaCy
-    spacy_out = os.path.join(outputs_dir, "spacy")
-    ensure_dir(spacy_out)
-    build_pred_conllu_end2end(
-        "spacy",
-        config["models"]["spacy"],
-        gold_path,
-        os.path.join(spacy_out, "bosque_pred_e2e.conllu"),
-    )
-    build_pred_wikiner_bio(
-        "spacy",
-        config["models"]["spacy"],
-        wikiner_path,
-        os.path.join(spacy_out, "wikiner_pred.bio"),
-        max_sentences=max_ner,
-    )
-
-    # Stanza
-    stanza_out = os.path.join(outputs_dir, "stanza")
-    ensure_dir(stanza_out)
-    build_pred_conllu_end2end(
-        "stanza",
-        config["models"]["stanza_lang"],
-        gold_path,
-        os.path.join(stanza_out, "bosque_pred_e2e.conllu"),
-    )
-    build_pred_wikiner_bio(
-        "stanza",
-        config["models"]["stanza_lang"],
-        wikiner_path,
-        os.path.join(stanza_out, "wikiner_pred.bio"),
-        max_sentences=max_ner,
-    )
-
-    # UDPipe
-    udpipe_out = os.path.join(outputs_dir, "udpipe")
-    ensure_dir(udpipe_out)
-    build_pred_conllu_end2end(
-        "udpipe",
-        config["paths"]["udpipe_model_path"],
-        gold_path,
-        os.path.join(udpipe_out, "bosque_pred_e2e.conllu"),
-    )
-    build_pred_wikiner_bio(
-        "udpipe",
-        config["paths"]["udpipe_model_path"],
-        wikiner_path,
-        os.path.join(udpipe_out, "wikiner_pred.bio"),
-        max_sentences=max_ner,
-    )
+    for name, (fw, model) in ud_systems(config).items():
+        out_dir = os.path.join(outputs_dir, name)
+        ensure_dir(out_dir)
+        build_pred_conllu_end2end(fw, model, gold_path, os.path.join(out_dir, "bosque_pred_e2e.conllu"),
+                                  model_dir=model_dirs(config).get(name))
+        if name in NER_SYSTEMS:
+            build_pred_wikiner_bio(fw, model, wikiner_path, os.path.join(out_dir, "wikiner_pred.bio"),
+                                   max_sentences=max_ner)
 
     logger.info("Todas as pipelines (end-to-end UD) foram executadas com sucesso!")

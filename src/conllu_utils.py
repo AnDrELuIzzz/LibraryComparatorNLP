@@ -194,15 +194,3 @@ def write_conllu(path: str, sentences: List[ConlluSentence]):
                     _clean_field(tok.misc),
                 ]) + "\n")
             f.write("\n")
-
-def reconstruct_text_from_gold(tokens: List[str], miscs: List[str]) -> str:
-    """
-    Reconstrói texto gold respeitando SpaceAfter=No do MISC.
-    Exemplo: ["d'", "água"] + ["SpaceAfter=No"] → "d'água"
-    """
-    text_parts = []
-    for tok, misc in zip(tokens, miscs):
-        text_parts.append(tok)
-        if "SpaceAfter=No" not in misc:
-            text_parts.append(" ")
-    return "".join(text_parts).rstrip()
